@@ -136,7 +136,7 @@ void read_matrix(const string &filename, int len, vector< vector<size_t> > &rows
     }
 }
 
-void row_pagerank(int id, MPI_Status status, int proc_n, int tag){
+void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     vector<double> pr;
 
     double convergence = DEFAULT_CONVERGENCE;
@@ -305,7 +305,7 @@ int main(){
     MPI_Comm_size(MPI_COMM_WORLD, &proc_n);
     // printf("%d\n",proc_n);
 
-    row_pagerank(my_rank,status,proc_n,tag);
+    ring_pagerank(my_rank,status,proc_n,tag);
 
     MPI_Finalize();
 
