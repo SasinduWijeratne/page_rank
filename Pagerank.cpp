@@ -14,8 +14,11 @@
 #include <math.h>
 #include "mpi.h"
 using namespace std;
-//mpic++
-#define TOT_PARTITIONS 2
+/*mpic++ your_code_file.c
+Execution
+
+mpirun -np <no. of Processors> ./a.out
+*/
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
@@ -133,15 +136,8 @@ void read_matrix(const string &filename, int len, vector< vector<size_t> > &rows
     }
 }
 
-void row_pagerank(int id){
+void row_pagerank(int id, MPI_Status status, int proc_n, int tag){
     vector<double> pr;
-    int tag = 50; /* Tag para as mensagens */
-    MPI_Status status;  /* Status de retorno */
-
-    MPI_Init (NULL , NULL);
-    int my_rank, proc_n;
-    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
-    MPI_Comm_size(MPI_COMM_WORLD, &proc_n);
 
     double convergence = DEFAULT_CONVERGENCE;
     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
@@ -156,8 +152,10 @@ void row_pagerank(int id){
     sum_pr = 0;
     dangling_pr = 0;
 
-    string file_vector = "vector" + to_string(id) +".txt";
-    string file_matrix = "mat" + to_string(id) +".txt";
+    // string file_vector = "vector" + to_string(id) +".txt";
+    // string file_matrix = "mat" + to_string(id) +".txt";
+    string file_vector = "vector0.txt";
+    string file_matrix = "mat0.txt";
 
     vector< vector<size_t> > rows;
     vector<size_t> num_outgoing;
@@ -176,27 +174,28 @@ void row_pagerank(int id){
 
     // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
     while (diff > convergence && num_iterations < max_iterations){
-
+        // printf("id: %d\n",id);
         if(num_iterations > 0){
 
-            if (my_rank%TOT_PARTITIONS == 0) {
+            if (id%proc_n == 0) {
             
                 // t1 = MPI_Wtime();  
 
-                MPI_Send (&pr[0], len, MPI_INT, 1, tag, MPI_COMM_WORLD);
-                MPI_Recv (&pr[0], len, MPI_INT, 1, tag, MPI_COMM_WORLD, &status);
+                MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
+                MPI_Recv (&pr[0], len, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
                 
                 // t2 = MPI_Wtime();
                 // printf("\nRound trip(s): %f\n\n", t2-t1);    
             }
             else {
             
-                MPI_Recv (&pr[0], len, MPI_INT, 0, tag, MPI_COMM_WORLD, &status);
-                MPI_Send (&pr[0], len, MPI_INT, 0, tag, MPI_COMM_WORLD);
+                MPI_Recv (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &status);
+                MPI_Send (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD);
             }
 
 
         }
+        if(pr[0] == -1) { break; }
 
         sum_pr = 0;
         dangling_pr = 0;
@@ -239,9 +238,9 @@ void row_pagerank(int id){
                 double h_v = (num_outgoing[*ci])
                     ? 1.0 / num_outgoing[*ci]
                     : 0.0;
-                if (num_iterations == 0 && trace) {
-                    cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
-                }
+                // if (num_iterations == 0 && trace) {
+                //     cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
+                // }
                 h += h_v * old_pr[*ci];
             }
             h *= alpha;
@@ -258,23 +257,54 @@ void row_pagerank(int id){
             // cout << num_iterations << ": ";
         // }
     }
+
     if (trace){
         double sum = 0;
         vector<double>::iterator cr;
-        cout << "(" << pr.size() << ") " << "[ ";
+        // cout << "(" << pr.size() << ") " << "[ ";
         for (cr = pr.begin(); cr != pr.end(); cr++) {
-            cout << *cr << " ";
+            // cout << *cr << " ";
             sum += *cr;
-            cout << "s = " << sum << " ";
+            // cout << "s = " << sum << " ";
         }
         cout << "] "<< sum << endl;
     }
+
+    pr[0] = -1;
+    if (id%proc_n == 0) {
+    
+        // t1 = MPI_Wtime();  
+
+        MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
+        MPI_Recv (&pr[0], len, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+        
+        // t2 = MPI_Wtime();
+        // printf("\nRound trip(s): %f\n\n", t2-t1);    
+    }
+    else {
+    
+        MPI_Recv (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &status);
+        MPI_Send (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD);
+    }
+
 
 }
 
 
 int main(){
-    row_pagerank(0);
+
+    int tag = 50; /* Tag para as mensagens */
+    MPI_Status status;  /* Status de retorno */
+
+    MPI_Init (NULL , NULL);
+    int my_rank, proc_n;
+    MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &proc_n);
+    printf("%d\n",proc_n);
+
+    row_pagerank(my_rank,status,proc_n,tag);
+
+    MPI_Finalize();
 
 
     // vector<size_t>::iterator ci;
