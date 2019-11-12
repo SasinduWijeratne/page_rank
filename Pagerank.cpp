@@ -177,10 +177,10 @@ void row_pagerank(int id, MPI_Status status, int proc_n, int tag){
         // printf("id: %d\n",id);
         if(num_iterations > 0){
 
-            if (id%proc_n == 0) {
+            if (id%2 == 0) {
             
                 // t1 = MPI_Wtime();  
-
+                // printf("id: %d\n",id);
                 MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
                 MPI_Recv (&pr[0], len, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
                 
@@ -188,14 +188,17 @@ void row_pagerank(int id, MPI_Status status, int proc_n, int tag){
                 // printf("\nRound trip(s): %f\n\n", t2-t1);    
             }
             else {
-            
-                MPI_Recv (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &status);
-                MPI_Send (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD);
+                // printf("id: %d\n",id);
+                MPI_Recv (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+                MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD); 
             }
 
 
         }
-        if(pr[0] == -1) { break; }
+        if(pr[0] == -1) { 
+            MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
+
+        break; }
 
         sum_pr = 0;
         dangling_pr = 0;
@@ -271,7 +274,7 @@ void row_pagerank(int id, MPI_Status status, int proc_n, int tag){
     }
 
     pr[0] = -1;
-    if (id%proc_n == 0) {
+    if (id%2 == 0) {
     
         // t1 = MPI_Wtime();  
 
@@ -283,8 +286,8 @@ void row_pagerank(int id, MPI_Status status, int proc_n, int tag){
     }
     else {
     
-        MPI_Recv (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &status);
-        MPI_Send (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD);
+        MPI_Recv (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+        MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
     }
 
 
@@ -300,7 +303,7 @@ int main(){
     int my_rank, proc_n;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &proc_n);
-    printf("%d\n",proc_n);
+    // printf("%d\n",proc_n);
 
     row_pagerank(my_rank,status,proc_n,tag);
 
