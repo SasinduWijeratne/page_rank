@@ -216,9 +216,13 @@ int main(int argc, char** argv) {
             for (i = 0; i < p; i++)
                 MPI_Wait(&requests[i], &status);
             t2 = MPI_Wtime();
+            if (status.MPI_TAG == 51) 
+                diff = 0;
             printf("[Master] Time for MPI recv: %f\n", t2-t1);
         } else {
             double t1, t2;
+            if (diff <= convergence)
+                tag = 51;
             t1 = MPI_Wtime();
             MPI_Isend(&pr[(my_rank-1)*len], len, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
@@ -229,8 +233,6 @@ int main(int argc, char** argv) {
         num_iterations++;
     }
     pr[0] = -1;
-
-//    fclose(f);
 
     MPI_Finalize();
     return 0;
