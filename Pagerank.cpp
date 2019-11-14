@@ -151,20 +151,20 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
 	        } else {
 	            /* Normalize so that we start with sum equal to one */
 	            for (i = 0; i < pr.size(); i++) {
-	                old_pr[i] = pr[i] / sum_pr;
+	                old_pr[i] = pr[i]; // old_pr[i] = pr[i] / sum_pr;
 	            }
 	        }
 	        /*
 	         * After normalisation the elements of the pagerank vector sum
 	         * to one
 	         */
-	        sum_pr = 1;
+	        // sum_pr = 1;
 	        
 	        /* An element of the A x I vector; all elements are identical */
 	        double one_Av = alpha * dangling_pr / num_rows;
 
 	        /* An element of the 1 x I vector; all elements are identical */
-	        double one_Iv = (1 - alpha) * sum_pr / num_rows;
+	        double one_Iv = (1 - alpha) / num_rows; //  double one_Iv = (1 - alpha) * sum_pr / num_rows;
 
 	        /* The difference to be checked for convergence */
 	        diff = 0;
@@ -179,7 +179,7 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
 	                // if (num_iterations == 0 && trace) {
 	                //     cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
 	                // }
-	                h += h_v * old_pr[*ci];
+	                h += h_v * (old_pr[*ci]/sum_pr);
 	            }
 	            h *= alpha;
 	            pr[i] = h + one_Av + one_Iv;
