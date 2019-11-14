@@ -22,7 +22,7 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
+const unsigned long DEFAULT_MAX_ITERATIONS = 10; //10000;
 int trace = 1;
 
 void read_vector(const string &filename, int &len, vector<size_t> &num_outgoing){
@@ -61,9 +61,6 @@ void read_matrix(const string &filename, int len, vector< vector<size_t> > &rows
         while(lineStream >> value)
         {
             rows[count].push_back(value);
-            // if(value != 0)
-            //     printf("%d\n",value);
-
         }
         count++;
     }
@@ -108,8 +105,6 @@ int main(int argc, char** argv) {
     sum_pr = 0;
     dangling_pr = 0;
 
-    // string file_vector = "vector" + to_string(my_rank) +".txt";
-    // string file_matrix = "mat" + to_string(my_rank) +".txt";
     string file_vector = "vector0.txt";
     string file_matrix = "mat0.txt";
 
@@ -121,8 +116,8 @@ int main(int argc, char** argv) {
     read_matrix(file_matrix,len,rows);
 
     int num_rows = len;
-    pr.resize(len*proc_n);
-    old_pr.resize(len);
+    pr.resize(len*p);
+    old_pr.resize(len*p);
     pr[0] = 1;
 
     int num_iterations = 0;
@@ -130,38 +125,38 @@ int main(int argc, char** argv) {
     int exit_flag = 0;
 
     vector<double> temp_pr;
-    temp_pr.resize(len);
-    /********************************/
 
-    sprintf(filename, "output%d.txt", my_rank);
-    f = fopen(filename, "w");
+    /********************************/
+//    sprintf(filename, "output%d.txt", my_rank);
+//    f = fopen(filename, "w");
 
     MPI_Barrier(MPI_COMM_WORLD);
 
     while (diff > convergence && num_iterations < max_iterations){
         if (my_rank == 0) {
+            double t1, t2;
+            t1 = MPI_Wtime();
             for (i = 1; i < proc_n; i++)
-                MPI_Isend(&pr[0], len*proc_n, MPI_INT, i, tag, MPI_COMM_WORLD, &request);
+                MPI_Isend(&pr[0], len*p, MPI_INT, i, tag, MPI_COMM_WORLD, &requests[i]);
+            for (i = 1; i < proc_n; i++)
+                MPI_Wait(&requests[i], &status);
+            t2 = MPI_Wtime();
+            printf("[Master] Time for MPI recv: %f\n", t2-t1);
         } else {
-            // t1 = MPI_Wtime();
-            MPI_Irecv(&pr[0], len*proc_n, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
+            double t1, t2;
+            t1 = MPI_Wtime();
+            MPI_Irecv(&pr[0], len*p, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
+            MPI_Wait(&request, &status);
+            t2 = MPI_Wtime();
+            printf("[Node %d] Time for MPI recv: %f\n", my_rank, t2-t1);
             if(pr[0] == -1){
                 exit_flag = 1;
             }
-            MPI_Wait(&request, &status);
-            // t2 = MPI_Wtime();
-            // fprintf(f, "[Worker %d] Time to receive from master is %f\n", my_rank, t2-t1);
         }
-        // MPI_Barrier(MPI_COMM_WORLD);
-        if(exit_flag) break;
 
-        if(my_rank > 0){
-
-        // if(pr[0] == -1) { break; }
-
+        if(my_rank > 0) {
             sum_pr = 0;
             dangling_pr = 0;
-
             for (size_t k = 0; k < pr.size(); k++) {
                 double cpr = pr[k];
                 sum_pr += cpr;
@@ -172,10 +167,18 @@ int main(int argc, char** argv) {
 
             if (num_iterations == 0) {
                 old_pr = pr;
+                diff = 999;
             } else {
+                diff = 0;
+                for (size_t k = 0; k < pr.size(); k++) {
+                    pr[k] /= sum_pr;
+                    diff += fabs(pr[k] - old_pr[k]);
+                }
+                diff /= pr.size();
+                dangling_pr /= sum_pr;
                 /* Normalize so that we start with sum equal to one */
                 for (i = 0; i < pr.size(); i++) {
-                    old_pr[i] = pr[i] / sum_pr;
+                    old_pr[i] = pr[i];
                 }
             }
             /*
@@ -190,8 +193,6 @@ int main(int argc, char** argv) {
             /* An element of the 1 x I vector; all elements are identical */
             double one_Iv = (1 - alpha) * sum_pr / num_rows;
 
-            /* The difference to be checked for convergence */
-            diff = 0;
             for (i = 0; i < num_rows; i++) {
                 /* The corresponding element of the H multiplication */
                 double h = 0.0;
@@ -200,58 +201,36 @@ int main(int argc, char** argv) {
                     double h_v = (num_outgoing[*ci])
                         ? 1.0 / num_outgoing[*ci]
                         : 0.0;
-                    // if (num_iterations == 0 && trace) {
-                    //     cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
-                    // }
-                    h += h_v * old_pr[*ci];
+                    h += h_v * (old_pr[*ci]/sum_pr);
                 }
                 h *= alpha;
-                pr[i +my_rank*len] = h + one_Av + one_Iv;
-                diff += fabs(pr[i +my_rank*len] - old_pr[i +my_rank*len]);
-                // printf("%f\n",dangling_pr);
-                // if(num_iterations == 12){
-                //     printf("h: %f one_Av: %f one_Iv: %f\n",h, one_Av, one_Iv);        
-                // }
+                pr[i + (my_rank-1)*len] = h + one_Av + one_Iv;
             }
-            // printf("diff: %f\n",diff);
-            // if (trace) {
-                // cout << num_iterations << ": ";
-            // }
-
         }
 
         if (my_rank == 0) {
-            // t1 = MPI_Wtime();
-            for (i = 0; i < proc_n - 1; i++){
-                MPI_Irecv(&temp_pr[0], len, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[i]);
+            double t1, t2;
+            t1 = MPI_Wtime();
+            for (i = 0; i < p; i++)
+                MPI_Irecv(&pr[i*len], len, MPI_INT, i+1, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[i]);
+            for (i = 0; i < p; i++)
                 MPI_Wait(&requests[i], &status);
-                for(int ii=0; ii< len; ii++){ //
-                    pr[(status.MPI_SOURCE)*len + ii] = temp_pr[ii];
-                    if(temp_pr[ii] == -1){
-                        pr[0] = -1;
-                        exit_flag = 1;
-                    }
-                }
-            }
-            // t2 = MPI_Wtime();
-            // fprintf(f, "[Master] Time to receive from workers is %f\n", t2-t1);
+            t2 = MPI_Wtime();
+            printf("[Master] Time for MPI recv: %f\n", t2-t1);
         } else {
-            // t1 = MPI_Wtime();
-            MPI_Isend(&pr[my_rank*len], len, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
+            double t1, t2;
+            t1 = MPI_Wtime();
+            MPI_Isend(&pr[(my_rank-1)*len], len, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
-            // t2 = MPI_Wtime();
-            // fprintf(f, "[Worker %d] Time to send to master is %f\n", my_rank, t2-t1);
+            t2 = MPI_Wtime();
+            printf("[Node %d] Time for MPI send: %f\n", my_rank, t2-t1);
         }
         MPI_Barrier(MPI_COMM_WORLD);
         num_iterations++;
     }
     pr[0] = -1;
-    if(my_rank > 0){
-        MPI_Isend(&pr[0], len, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
-        MPI_Wait(&request, &status);
-    }
 
-    fclose(f);
+//    fclose(f);
 
     MPI_Finalize();
     return 0;
