@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <malloc.h>
 #include <time.h>
@@ -25,52 +26,33 @@ const double DEFAULT_CONVERGENCE = 0.00001;
 const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
 int trace = 1;
 
-void read_vector(const string &filename, int &len, vector<size_t> &num_outgoing){
-
+void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
     istream *infile;
-
     infile = new ifstream(filename.c_str());
-
     string line;
 
-    getline(*infile, line);
-    len = strtol(line.c_str(), NULL, 10);
-    num_outgoing.resize(len);
-    int count = 0;
+    size_t count = 0;
+    size_t prev = -1;
     while (getline(*infile, line)){
-        int num = strtol(line.c_str(), NULL, 10);
-        num_outgoing[count] = num;
-        count++;
-    }
-}
-
-void read_matrix(const string &filename, int len, vector< vector<size_t> > &rows){
-
-    istream *infile;
-
-    infile = new ifstream(filename.c_str());
-
-    string line;
-
-    rows.resize(len);
-    int count = 0;
-    while (getline(*infile, line)){
-        stringstream  lineStream(line);
-        size_t value;
-
-        while(lineStream >> value)
-        {
-            rows[count].push_back(value);
-            // if(value != 0)
-            //     printf("%d\n",value);
-
+        stringstream lineStream(line);
+        size_t src, dest;
+        lineStream >> src >> dest;
+        if (prev != src) {
+            prev++;
+            for (; prev < src; prev++)
+                offsets[prev] = count;
+            offsets[src] = count;
+            prev = src;
         }
+        edgesDest[count] = dest;
         count++;
     }
 }
 
 void pagerank(){
-    vector<double> pr;
+
+    struct timespec start, stop; 
+    double time;
 
     double convergence = DEFAULT_CONVERGENCE;
     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
@@ -78,52 +60,70 @@ void pagerank(){
     double sum_pr;
     double dangling_pr;
     double alpha = DEFAULT_ALPHA;
-    vector<double> old_pr;
-    vector<size_t>::iterator ci;
     int i;
 
     sum_pr = 0;
     dangling_pr = 0;
 
-    // string file_vector = "vector" + to_string(id) +".txt";
-    // string file_matrix = "mat" + to_string(id) +".txt";
-    string file_vector = "vector0.txt";
-    string file_matrix = "mat0.txt";
+    string file_metadata = "graph.metadata";
+    string file_matrix = "graph.txt";
 
-    vector< vector<size_t> > rows;
-    vector<size_t> num_outgoing;
-    int len;
+    //vector<size_t> edgesDest;
+    //vector<size_t> offsets;
 
-    read_vector(file_vector,len, num_outgoing);
-    read_matrix(file_matrix,len,rows);
+    size_t *edgesDest, *offsets;
 
-    int num_rows = len;
-    pr.resize(len);
-    old_pr.resize(len);
+    size_t num_vertices;
+    size_t num_edges;
+
+    FILE *fp = fopen(file_metadata.c_str(), "r");
+    fscanf(fp, "%lu %lu", &num_vertices, &num_edges);
+    fclose(fp);
+
+    edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
+    offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
+
+//    edgesDest.resize(num_edges);
+//    offsets.resize(num_vertices + 1);
+
+    offsets[num_vertices] = num_edges;
+
+    read_matrix(file_matrix, edgesDest, offsets);
+
+    double *pr, *old_pr;
+
+    pr = (double *) calloc(num_vertices , sizeof(double));
+    old_pr = (double *) calloc(num_vertices , sizeof(double));
+
+//    pr.resize(num_vertices);
+//    old_pr.resize(num_vertices);
+
     pr[0] = 1;
 
     int num_iterations = 0;
     double diff = 1;
-
+    if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
     // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
     while (diff > convergence && num_iterations < max_iterations) {
 
         sum_pr = 0;
         dangling_pr = 0;
         
-        for (size_t k = 0; k < pr.size(); k++) {
+        for (size_t k = 0; k < num_vertices; k++) {
             double cpr = pr[k];
             sum_pr += cpr;
-            if (num_outgoing[k] == 0) {
+            if (offsets[k+1] - offsets[k] == 0) {
                 dangling_pr += cpr;
             }
         }
 
         if (num_iterations == 0) {
-            old_pr = pr;
+            // for (i = 0; i < num_vertices; i++)
+            //     old_pr[i] = 1/num_vertices;
+            old_pr[0] = 1;
         } else {
             /* Normalize so that we start with sum equal to one */
-            for (i = 0; i < pr.size(); i++) {
+            for (i = 0; i < num_vertices; i++) {
                 old_pr[i] = pr[i] / sum_pr;
             }
         }
@@ -135,22 +135,22 @@ void pagerank(){
         sum_pr = 1;
         
         /* An element of the A x I vector; all elements are identical */
-        double one_Av = alpha * dangling_pr / num_rows;
+        double one_Av = alpha * dangling_pr / num_vertices;
 
         /* An element of the 1 x I vector; all elements are identical */
-        double one_Iv = (1 - alpha) * sum_pr / num_rows;
+        double one_Iv = (1 - alpha) * sum_pr / num_vertices;
 
         /* The difference to be checked for convergence */
         diff = 0;
-        for (i = 0; i < num_rows; i++) {
+        for (i = 0; i < num_vertices; i++) {
             /* The corresponding element of the H multiplication */
             double h = 0.0;
-            for (ci = rows[i].begin(); ci != rows[i].end(); ci++) {
+            for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
                 /* The current element of the H vector */
-                double h_v = (num_outgoing[*ci])
-                    ? 1.0 / num_outgoing[*ci]
+                double h_v = (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
+                    ? 1.0 / (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
                     : 0.0;
-                h += h_v * old_pr[*ci];
+                h += h_v * old_pr[edgesDest[ci]];
             }
             h *= alpha;
             pr[i] = h + one_Av + one_Iv;
@@ -159,17 +159,10 @@ void pagerank(){
         num_iterations++;
     }
 
-    if (trace){
-        double sum = 0;
-        vector<double>::iterator cr;
-        // cout << "(" << pr.size() << ") " << "[ ";
-        for (cr = pr.begin(); cr != pr.end(); cr++) {
-            // cout << *cr << " ";
-            sum += *cr;
-            // cout << "s = " << sum << " ";
-        }
-        cout << "] "<< sum << endl;
-    }
+    if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
+    time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+    printf("Total Time: %f sec\n",time);
+    printf("Iter: %d Diff: %f \n",num_iterations,diff);
 
 }
 
