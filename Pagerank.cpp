@@ -14,6 +14,8 @@
 #include <math.h>
 #include "mpi.h"
 using namespace std;
+#define NUM_WORKERS 4
+#define PREPROCESSING 0
 #define MODE 0 // 0 - ring 1 - s2c2
 /*mpic++ your_code_file.c
 Execution
@@ -26,52 +28,169 @@ const double DEFAULT_CONVERGENCE = 0.00001;
 const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
 int trace = 1;
 
-void read_vector(const string &filename, int &len, vector<size_t> &num_outgoing){
+void read_partition_edges(char filename[], size_t* edgesDest){
 
     istream *infile;
 
-    infile = new ifstream(filename.c_str());
+    infile = new ifstream(filename);
 
     string line;
 
-    getline(*infile, line);
-    len = strtol(line.c_str(), NULL, 10);
-    num_outgoing.resize(len);
     int count = 0;
     while (getline(*infile, line)){
         int num = strtol(line.c_str(), NULL, 10);
-        num_outgoing[count] = num;
+        edgesDest[count] = num;
         count++;
     }
+
+
+
 }
 
-void read_matrix(const string &filename, int len, vector< vector<size_t> > &rows){
+void read_partition_offset(char filename[], size_t* offsets){
 
     istream *infile;
 
-    infile = new ifstream(filename.c_str());
+    infile = new ifstream(filename);
 
     string line;
 
-    rows.resize(len);
     int count = 0;
     while (getline(*infile, line)){
-        stringstream  lineStream(line);
-        size_t value;
-
-        while(lineStream >> value)
-        {
-            rows[count].push_back(value);
-            // if(value != 0)
-            //     printf("%d\n",value);
-
-        }
+        int num = strtol(line.c_str(), NULL, 10);
+        offsets[count] = num;
         count++;
     }
+
 }
 
+void read_partition_write(size_t *offsets, size_t *edgesDest,int offset_size, int edge_size){ // edge_size = one partition size
+    FILE *f;
+    char filename[20];
+    int start_point = 0;
+    int end_point = 0;
+    int partition_number = 0;
+    int global_count = 0;
+    int internal_count = 0;
+
+    while (end_point < offsets[offset_size]){
+        sprintf(filename, "partition%d.txt", partition_number);
+        f = fopen(filename, "w");
+        internal_count = 0;
+        while((end_point - start_point) < edge_size){
+            end_point = offsets[global_count];
+            // printf("%d,%d,%d\n",start_point,end_point,edge_size); exit(0);
+            if(end_point == offsets[offset_size]){
+                for(int kk= start_point; kk < end_point; kk++){
+                    fprintf(f, "%zu\n", edgesDest[kk]);
+                }
+                break;
+            } 
+
+            if((end_point - start_point) >= edge_size){
+                if(internal_count == 0){
+                    for(int kk= start_point; kk < end_point; kk++){
+                        fprintf(f, "%zu\n", edgesDest[start_point + kk]);
+                    }
+                }
+                else{
+                    if((end_point - start_point) < 1.5*edge_size){
+                        for(int kk= start_point; kk < end_point; kk++){
+                            fprintf(f, "%zu\n", edgesDest[kk]);
+                        }
+                    }
+                    else{
+                        for(int kk= start_point; kk < offsets[global_count-1]; kk++){
+                            fprintf(f, "%zu\n", edgesDest[kk]); 
+                        }
+                            global_count--;                           
+                    }
+                }
+            }
+                global_count++;
+                internal_count++; 
+        }
+            
+        partition_number++;
+        start_point = end_point;
+        fclose(f);
+    }
+
+}
+
+void partition_meta(int edge_size, int offset_size, int per_vertex){
+    FILE *f;
+    char filename[20];
+    sprintf(filename, "partition.metadata");
+    f = fopen(filename, "w");
+    fprintf(f, "%d %d %d\n", edge_size,offset_size,per_vertex);
+    fclose(f);
+}
+
+void read_partition_write_simple(size_t *edgesDest,int edge_size){ // edge_size = per block size
+    FILE *f;
+    char filename[20];
+    int start_point = 0;
+    int end_point = 0;
+    int partition_number = 0;
+    int global_count = 0;
+    int internal_count = 0;
+
+    for (int i = 0; i < NUM_WORKERS; ++i)
+    {
+        sprintf(filename, "sipartition%d.txt", i);
+        f = fopen(filename, "w");
+        for (int j = 0; j < edge_size; ++j)
+        {
+            fprintf(f, "%zu\n", edgesDest[edge_size*i+j]);
+        }
+        fclose(f);
+    }
+
+}
+
+void read_offset_write( size_t *offsets, int tot_size){ 
+    FILE *f;
+    char filename[20];
+    sprintf(filename, "offset.txt");
+    f = fopen(filename, "w");
+    for(int i = 0; i < tot_size; i++ ){
+        fprintf(f, "%zu\n", offsets[i]);
+    }
+    fclose(f);
+}
+
+int read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, int edge_count){
+    istream *infile;
+    infile = new ifstream(filename.c_str());
+    string line;
+
+    size_t count = 0;
+    size_t prev = -1;
+    while (getline(*infile, line)){
+        stringstream lineStream(line);
+        size_t src, dest;
+        lineStream >> src >> dest;
+        if (prev != src) {
+            prev++;
+            for (; prev < src; prev++)
+                offsets[prev] = count;
+            offsets[src] = count;
+            prev = src;
+        }
+        edgesDest[count] = dest;
+        count++;
+    }
+
+    for(int kk=count ; kk <edge_count; kk++ ){
+        offsets[kk] = count;
+    }
+
+    return count;
+
+}
+#if PREPROCESSING == 0
 void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
-    vector<double> pr;
 
     double convergence = DEFAULT_CONVERGENCE;
     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
@@ -79,381 +198,193 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     double sum_pr;
     double dangling_pr;
     double alpha = DEFAULT_ALPHA;
-    vector<double> old_pr;
-    vector<size_t>::iterator ci;
     int i;
 
     sum_pr = 0;
     dangling_pr = 0;
 
-    // string file_vector = "vector" + to_string(id) +".txt";
-    // string file_matrix = "mat" + to_string(id) +".txt";
-    string file_vector = "vector0.txt";
-    string file_matrix = "mat0.txt";
+    size_t num_vertices;
+    size_t tot_num_vertices;
+    size_t num_edges;
 
-    vector< vector<size_t> > rows;
-    vector<size_t> num_outgoing;
-    int len;
 
-    read_vector(file_vector,len, num_outgoing);
-    read_matrix(file_matrix,len,rows);
+    string file_metadata = "partition.metadata";
+    char filename[20];
+    char filename1[20];
+    sprintf(filename, "partition%d.txt", id);
+    sprintf(filename1, "offset.txt");
 
-    int num_rows = len;
-    pr.resize(len);
-    old_pr.resize(len);
+    FILE *fp = fopen(file_metadata.c_str(), "r");
+    fscanf(fp, "%lu %lu %lu", &num_edges,&tot_num_vertices, &num_vertices);
+    fclose(fp);
+
+    double *pr, *old_pr;
+    size_t *edgesDest, *offsets;
+
+    edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
+    offsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
+
+    pr = (double *) calloc(num_vertices , sizeof(double));
+    old_pr = (double *) calloc(num_vertices , sizeof(double));
+
+    read_partition_edges(filename,edgesDest);
+    read_partition_offset(filename1,offsets);
+
+//    pr.resize(num_vertices);
+//    old_pr.resize(num_vertices);
+
     pr[0] = 1;
 
     int num_iterations = 0;
     double diff = 1;
+    double diff_prev = -1;
 
-    // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
-    while (diff > convergence && num_iterations < max_iterations){
+
+    // // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
+    while ((num_iterations < max_iterations) && (fabs(diff - diff_prev)/diff > convergence)) {
         // printf("id: %d\n",id);
-        for(int sas_i = 0; sas_i < proc_n-1; sas_i++){
-	        if(num_iterations > 0){
-
-	            if (id%2 == 0) {
-	            
-	                // t1 = MPI_Wtime();  
-	                // printf("id: %d\n",id);
-	                MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
-	                MPI_Recv (&pr[0], len, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-	                
-	                // t2 = MPI_Wtime();
-	                // printf("\nRound trip(s): %f\n\n", t2-t1);    
-	            }
-	            else {
-	                // printf("id: %d\n",id);
-	                MPI_Recv (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-	                MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD); 
-	            }
-
-
-	        }
-	        if(pr[0] == -1) { 
-	            MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
-
-	        break; }
+        diff_prev = diff;
+        diff = 0;
+        for(int sas_i = 0; sas_i < proc_n; sas_i++){
 
 	        sum_pr = 0;
 	        dangling_pr = 0;
 
-	        for (size_t k = 0; k < pr.size(); k++) {
+	        for (size_t k = 0; k < num_vertices; k++) {
 	            double cpr = pr[k];
 	            sum_pr += cpr;
-	            if (num_outgoing[k] == 0) {
+	            if (offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k+1] - offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k] == 0)
 	                dangling_pr += cpr;
-	            }
-	        }
+	       }
 
-	        if (num_iterations == 0) {
-	            old_pr = pr;
-	        } else {
-	            /* Normalize so that we start with sum equal to one */
-	            for (i = 0; i < pr.size(); i++) {
-	                old_pr[i] = pr[i]; // old_pr[i] = pr[i] / sum_pr;
-	            }
-	        }
+
+            diff += sum_pr;
+
+            if (num_iterations == 0) {
+                old_pr = pr;
+            } else {
+                for (size_t k = 0; k < num_vertices; k++) {
+                    pr[k] /= sum_pr;
+                }
+                dangling_pr /= sum_pr;
+                /* Normalize so that we start with sum equal to one */
+                for (i = 0; i < num_vertices; i++) {
+                    old_pr[i] = pr[i];
+                }
+            }
 	        /*
 	         * After normalisation the elements of the pagerank vector sum
 	         * to one
 	         */
-	        // sum_pr = 1;
+	        sum_pr = 1;
 	        
 	        /* An element of the A x I vector; all elements are identical */
-	        double one_Av = alpha * dangling_pr / num_rows;
+	        double one_Av = alpha * dangling_pr / (num_vertices*proc_n);
 
 	        /* An element of the 1 x I vector; all elements are identical */
-	        double one_Iv = (1 - alpha) / num_rows; //  double one_Iv = (1 - alpha) * sum_pr / num_rows;
+	        double one_Iv = (1 - alpha) * sum_pr / (num_vertices*proc_n);
 
 	        /* The difference to be checked for convergence */
-	        diff = 0;
-	        for (i = 0; i < num_rows; i++) {
-	            /* The corresponding element of the H multiplication */
-	            double h = 0.0;
-	            for (ci = rows[i].begin(); ci != rows[i].end(); ci++) {
-	                /* The current element of the H vector */
-	                double h_v = (num_outgoing[*ci])
-	                    ? 1.0 / num_outgoing[*ci]
-	                    : 0.0;
-	                // if (num_iterations == 0 && trace) {
-	                //     cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
-	                // }
-	                h += h_v * (old_pr[*ci]/sum_pr);
-	            }
-	            h *= alpha;
-	            pr[i] = h + one_Av + one_Iv;
-	            diff += fabs(pr[i] - old_pr[i]);
-	            // printf("%f\n",dangling_pr);
-	            // if(num_iterations == 12){
-	            //     printf("h: %f one_Av: %f one_Iv: %f\n",h, one_Av, one_Iv);        
-	            // }
-	        }
-	        MPI_Barrier(MPI_COMM_WORLD);
+            for (i = 0; i < num_vertices; i++) {
+                /* The corresponding element of the H multiplication */
+                double h = 0.0;
+                int abs_i = num_vertices*((id + proc_n - sas_i)%proc_n) + i;
+
+                for (size_t ci = offsets[abs_i]; ci < offsets[abs_i+1]; ci++) {
+                //     /* The current element of the H vector */
+                    if((edgesDest[ci] >= num_vertices*((id + proc_n - sas_i)%proc_n)) && (edgesDest[ci] < num_vertices*((id + proc_n - sas_i)%proc_n+1))){
+                        double h_v = (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
+                                    ? 1.0 / (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
+                                    : 0.0;
+                        h += h_v * old_pr[edgesDest[ci]%proc_n];                        
+                    }
+
+                }
+                h *= alpha;
+                pr[i] = h + one_Av + one_Iv;
+            }
+
+            //** if sas_i != proc_n 
+            if (id%2 == 0) {
+            
+                // t1 = MPI_Wtime();  
+                // printf("id: %d\n",id);
+                MPI_Send (&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
+                MPI_Recv (&pr[0], num_vertices, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+                
+                // t2 = MPI_Wtime();
+                // printf("\nRound trip(s): %f\n\n", t2-t1);    
+            }
+            else {
+                // printf("id: %d\n",id);
+                MPI_Recv (&pr[0], num_vertices, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+                MPI_Send (&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD); 
+            }
+
 	    }
 	        // printf("diff: %f\n",diff);
+        // printf("%d %f\n",num_iterations,fabs(diff - diff_prev)/diff);
         num_iterations++;
+        MPI_Barrier(MPI_COMM_WORLD);
         // if (trace) {
             // cout << num_iterations << ": ";
         // }
     }
 
-    if (trace){
-        double sum = 0;
-        vector<double>::iterator cr;
-        // cout << "(" << pr.size() << ") " << "[ ";
-        for (cr = pr.begin(); cr != pr.end(); cr++) {
-            // cout << *cr << " ";
-            sum += *cr;
-            // cout << "s = " << sum << " ";
-        }
-        cout << "] "<< sum << endl;
-    }
-
-    pr[0] = -1;
-    if (id%2 == 0) {
-    
-        // t1 = MPI_Wtime();  
-
-        MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
-        MPI_Recv (&pr[0], len, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-        
-        // t2 = MPI_Wtime();
-        // printf("\nRound trip(s): %f\n\n", t2-t1);    
-    }
-    else {
-    
-        MPI_Recv (&pr[0], len, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-        MPI_Send (&pr[0], len, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
-    }
-
 
 }
-
-
-/* This is the master */
-// int master_io(int id, MPI_Status status, int proc_n, int tag)
-// {
-
-    
-
-//     double convergence = DEFAULT_CONVERGENCE;
-//     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
-
-//     double sum_pr;
-//     double dangling_pr;
-//     double alpha = DEFAULT_ALPHA;
-//     vector<size_t>::iterator ci;
-//     int i;
-
-//     sum_pr = 0;
-//     dangling_pr = 0;
-
-//     string file_vector = "vector.txt";
-
-
-//     vector<size_t> num_outgoing;
-//     int len;
-//     read_vector(file_vector,len, num_outgoing);
-
-
-
-//     pr[0] = 1;
-
-//     int num_iterations = 0;
-//     double diff = 1;
-//     int terminate = 0;
-//     int temp_teminate = -1;
-
-//     // while(terminate == 0){
-//         for(int k=0; k < proc_n; k++){
-//             MPI_Send (&pr[0], len*proc_n, MPI_INT, k, tag, MPI_COMM_WORLD);
-//         }
-//         // if(temp_teminate == -1){
-//         //     terminate = 0;
-//         //     break;
-//         // }
-
-//         for(int k=0; k < proc_n; k++){
-//             MPI_Recv (&temp_pr[0], len, MPI_INT, k, tag, MPI_COMM_WORLD, &status);
-//             if(temp_pr[0] == -1){
-//                 temp_teminate = 0;
-//             }
-//             for(int ii=0; ii< len; ii++){
-//                 pr[k*len + ii] = temp_pr[ii];
-//             }
-//         }
-//     // }
-
-
-
-// }
-
-void s2c2_pagerank(int id, MPI_Status status, int proc_n, int tag, MPI_Request request, MPI_Request requests[])
-{
-    vector<double> pr;
-
-    double convergence = DEFAULT_CONVERGENCE;
-    unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
-
-    double sum_pr;
-    double dangling_pr;
-    double alpha = DEFAULT_ALPHA;
-    vector<double> old_pr;
-    vector<size_t>::iterator ci;
-    int i;
-
-    sum_pr = 0;
-    dangling_pr = 0;
-
-    // string file_vector = "vector" + to_string(id) +".txt";
-    // string file_matrix = "mat" + to_string(id) +".txt";
-    string file_vector = "vector0.txt";
-    string file_matrix = "mat0.txt";
-
-    vector< vector<size_t> > rows;
-    vector<size_t> num_outgoing;
-    int len;
-
-    read_vector(file_vector,len, num_outgoing);
-    read_matrix(file_matrix,len,rows);
-
-    int num_rows = len;
-    pr.resize(len*proc_n);
-    old_pr.resize(len);
-    pr[0] = 1;
-
-    int num_iterations = 0;
-    double diff = 1;
-
-    vector<double> temp_pr;
-    temp_pr.resize(len);
-
-    // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
-    // while (diff > convergence && num_iterations < max_iterations){
-        // printf("id: %d\n",id);
-
-        // printf("id: %d\n",id);
-        if(id == 0){
-
-
-            for(int k=1; k < proc_n; k++){
-                MPI_Isend (&pr[0], len*proc_n, MPI_INT, k, tag, MPI_COMM_WORLD, &request);
-            }
-
-
-        }
-        else{
-            MPI_Irecv (&pr[0], len*proc_n, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
-            MPI_Wait(&request, &status);
-        }
-        if(id > 0){
-
-        // if(pr[0] == -1) { break; }
-
-            sum_pr = 0;
-            dangling_pr = 0;
-
-            for (size_t k = 0; k < pr.size(); k++) {
-                double cpr = pr[k];
-                sum_pr += cpr;
-                if (num_outgoing[k] == 0) {
-                    dangling_pr += cpr;
-                }
-            }
-
-            if (num_iterations == 0) {
-                old_pr = pr;
-            } else {
-                /* Normalize so that we start with sum equal to one */
-                for (i = 0; i < pr.size(); i++) {
-                    old_pr[i] = pr[i] / sum_pr;
-                }
-            }
-            /*
-             * After normalisation the elements of the pagerank vector sum
-             * to one
-             */
-            sum_pr = 1;
-            
-            /* An element of the A x I vector; all elements are identical */
-            double one_Av = alpha * dangling_pr / num_rows;
-
-            /* An element of the 1 x I vector; all elements are identical */
-            double one_Iv = (1 - alpha) * sum_pr / num_rows;
-
-            /* The difference to be checked for convergence */
-            diff = 0;
-            for (i = 0; i < num_rows; i++) {
-                /* The corresponding element of the H multiplication */
-                double h = 0.0;
-                for (ci = rows[i].begin(); ci != rows[i].end(); ci++) {
-                    /* The current element of the H vector */
-                    double h_v = (num_outgoing[*ci])
-                        ? 1.0 / num_outgoing[*ci]
-                        : 0.0;
-                    // if (num_iterations == 0 && trace) {
-                    //     cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
-                    // }
-                    h += h_v * old_pr[*ci];
-                }
-                h *= alpha;
-                pr[i +id*len] = h + one_Av + one_Iv;
-                diff += fabs(pr[i +id*len] - old_pr[i +id*len]);
-                // printf("%f\n",dangling_pr);
-                // if(num_iterations == 12){
-                //     printf("h: %f one_Av: %f one_Iv: %f\n",h, one_Av, one_Iv);        
-                // }
-            }
-            // printf("diff: %f\n",diff);
-            num_iterations++;
-            // if (trace) {
-                // cout << num_iterations << ": ";
-            // }
-
-        }
-
-        if(id == 0){
-            for(int k=1; k < proc_n; k++){
-                MPI_Irecv (&temp_pr[0], len, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD,  &requests[i]);
-
-                MPI_Wait(&requests[k], &status);
-                for(int ii=0; ii< len; ii++){
-                    pr[(k-1)*len + ii] = temp_pr[ii];
-                }
-            }
-
-        }
-        else{
-        	 MPI_Isend (&pr[0], len, MPI_INT, 0, tag, MPI_COMM_WORLD,&request); 
-        	 MPI_Wait(&request, &status);
-        }
-
-
-    
-    // }
-
-    if (trace){
-        double sum = 0;
-        vector<double>::iterator cr;
-        // cout << "(" << pr.size() << ") " << "[ ";
-        for (cr = pr.begin(); cr != pr.end(); cr++) {
-            // cout << *cr << " ";
-            sum += *cr;
-            // cout << "s = " << sum << " ";
-        }
-        cout << "] "<< sum << endl;
-    }
-
-    // pr[0] = -1;
-    // if(id > 0)
-    // 	MPI_Send (&pr[0], len, MPI_INT, 0, tag, MPI_COMM_WORLD);
-
-
-}
+#endif
 
 #if MODE == 0
 int main(){
+
+#if  PREPROCESSING
+    /* Preprocessing */
+    string file_metadata = "graph.metadata";
+    string file_matrix = "graph.txt";
+
+    //vector<size_t> edgesDest;
+    //vector<size_t> offsets;
+
+    size_t *edgesDest, *offsets;
+
+    size_t num_vertices;
+    size_t num_edges;
+
+    FILE *fp = fopen(file_metadata.c_str(), "r");
+    fscanf(fp, "%lu %lu", &num_vertices, &num_edges);
+    fclose(fp);
+
+    edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
+    offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
+
+//    edgesDest.resize(num_edges);
+//    offsets.resize(num_vertices + 1);
+
+    offsets[num_vertices] = num_edges;
+
+    int dump_count = read_matrix(file_matrix, edgesDest, offsets, num_vertices + 1);
+
+    read_offset_write(offsets,num_vertices);
+
+    read_partition_write(offsets, edgesDest,num_vertices, num_edges/NUM_WORKERS);
+
+    partition_meta(num_edges, num_vertices+1,num_edges/NUM_WORKERS);
+
+    //read_partition(char filename[], size_t* edgesDest, size_t* offsets)
+
+    // partition_meta(int edge_size, int offset_size)
+
+//read_partition_write(size_t *offsets, size_t *edgesDest,int offset_size, int edge_size)
+
+    //void read_partition_write_simple(size_t *edgesDest,int edge_size)
+    // read_partition_write_simple(edgesDest,dump_count/NUM_WORKERS);
+
+    /* End of Preprocessing*/
+
+#else
+
+
 
     int tag = 50;
     MPI_Status status;  
@@ -476,6 +407,9 @@ int main(){
     //         if(*ci != 0)
     //             printf("num: %f %d\n",*ci, i);
     // }
+
+#endif
+
     return 0;
 }
 
