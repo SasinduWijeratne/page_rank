@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 #define NUM_WORKERS 4
-#define PREPROCESSING 0
+#define PREPROCESSING 1
 #define MODE 0 // 0 - ring 1 - s2c2
 /*mpic++ your_code_file.c
 Execution
@@ -160,10 +160,13 @@ void read_offset_write( size_t *offsets, int tot_size){
     fclose(f);
 }
 
-int read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, int edge_count){
+void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, int num_vertices, int num_edges){
     istream *infile;
     infile = new ifstream(filename.c_str());
     string line;
+
+    size_t* temp_offsets;
+    temp_offsets = (size_t *) calloc((num_vertices) , sizeof(size_t));
 
     size_t count = 0;
     size_t prev = -1;
@@ -171,22 +174,37 @@ int read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, int 
         stringstream lineStream(line);
         size_t src, dest;
         lineStream >> src >> dest;
-        if (prev != src) {
-            prev++;
-            for (; prev < src; prev++)
-                offsets[prev] = count;
-            offsets[src] = count;
-            prev = src;
-        }
-        edgesDest[count] = dest;
-        count++;
+        offsets[dest]++;
     }
 
-    for(int kk=count ; kk <edge_count; kk++ ){
-        offsets[kk] = count;
+    for(int kk=0; kk < num_vertices; kk++){
+        if(kk > 0)
+            offsets[kk] = offsets[kk-1] + offsets[kk];
+            // printf("%d\n", offsets[kk]);
     }
 
-    return count;
+    istream *infile2;
+    infile2 = new ifstream(filename.c_str());
+    string line2;
+
+    while (getline(*infile2, line2)){
+        stringstream lineStream(line2);
+        size_t src, dest;
+        lineStream >> src >> dest;
+        if(dest > 0)
+            edgesDest[offsets[dest-1] + temp_offsets[dest]] = src;
+        else
+            edgesDest[temp_offsets[dest]] = src;    
+        temp_offsets[dest]++;
+    }
+
+
+
+    // for(int kk=count ; kk <num_edges; kk++ ){
+    //    printf("%d\n",edgesDest[kk] );
+    // }
+
+    free(temp_offsets);
 
 }
 #if PREPROCESSING == 0
@@ -355,15 +373,15 @@ int main(){
     fscanf(fp, "%lu %lu", &num_vertices, &num_edges);
     fclose(fp);
 
-    edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
-    offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
+    edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
+    offsets = (size_t *) calloc((num_vertices + 1) , sizeof(size_t));
 
 //    edgesDest.resize(num_edges);
 //    offsets.resize(num_vertices + 1);
 
-    offsets[num_vertices] = num_edges;
+    // offsets[num_vertices] = num_edges;
 
-    int dump_count = read_matrix(file_matrix, edgesDest, offsets, num_vertices + 1);
+    read_matrix(file_matrix, edgesDest, offsets, num_vertices + 1, num_edges);
 
     read_offset_write(offsets,num_vertices);
 
