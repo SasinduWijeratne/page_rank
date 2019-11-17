@@ -102,9 +102,10 @@ void pagerank(){
 
     int num_iterations = 0;
     double diff = 1;
+    double pre_diff = -1;
     if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
     // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
-    while (diff > convergence && num_iterations < max_iterations) {
+    while (diff > convergence && num_iterations < max_iterations && fabs(pre_diff-diff) > 0.0000001 ) {
 
         sum_pr = 0;
         dangling_pr = 0;
@@ -141,6 +142,7 @@ void pagerank(){
         double one_Iv = (1 - alpha) * sum_pr / num_vertices;
 
         /* The difference to be checked for convergence */
+        pre_diff = diff;
         diff = 0;
         for (i = 0; i < num_vertices; i++) {
             /* The corresponding element of the H multiplication */
