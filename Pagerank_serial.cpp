@@ -23,7 +23,7 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
+const unsigned long DEFAULT_MAX_ITERATIONS = 100; //10000;
 int trace = 1;
 
 void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
@@ -68,11 +68,6 @@ void pagerank(){
     string file_metadata = "graph.metadata";
     string file_matrix = "graph.txt";
 
-    //vector<size_t> edgesDest;
-    //vector<size_t> offsets;
-
-    size_t *edgesDest, *offsets;
-
     size_t num_vertices;
     size_t num_edges;
 
@@ -80,31 +75,22 @@ void pagerank(){
     fscanf(fp, "%lu %lu", &num_vertices, &num_edges);
     fclose(fp);
 
+    double *pr, *old_pr;
+    size_t *edgesDest, *offsets;
+    pr = (double *) calloc(num_vertices , sizeof(double));
+    old_pr = (double *) calloc(num_vertices , sizeof(double));
     edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
     offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
 
-//    edgesDest.resize(num_edges);
-//    offsets.resize(num_vertices + 1);
-
     offsets[num_vertices] = num_edges;
-
     read_matrix(file_matrix, edgesDest, offsets);
-
-    double *pr, *old_pr;
-
-    pr = (double *) calloc(num_vertices , sizeof(double));
-    old_pr = (double *) calloc(num_vertices , sizeof(double));
-
-//    pr.resize(num_vertices);
-//    old_pr.resize(num_vertices);
-
+    
     pr[0] = 1;
 
     int num_iterations = 0;
     double diff = 1;
-    if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
-    // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
     while (diff > convergence && num_iterations < max_iterations) {
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
 
         sum_pr = 0;
         dangling_pr = 0;
@@ -118,13 +104,17 @@ void pagerank(){
         }
 
         if (num_iterations == 0) {
-            // for (i = 0; i < num_vertices; i++)
-            //     old_pr[i] = 1/num_vertices;
             old_pr[0] = 1;
+            diff = 999;
         } else {
             /* Normalize so that we start with sum equal to one */
+            diff = 0;
+            
+            double tmp;
             for (i = 0; i < num_vertices; i++) {
-                old_pr[i] = pr[i] / sum_pr;
+                tmp = pr[i] / sum_pr;
+                diff += fabs(tmp - old_pr[i]);
+                old_pr[i] = tmp;
             }
         }
 
@@ -141,7 +131,7 @@ void pagerank(){
         double one_Iv = (1 - alpha) * sum_pr / num_vertices;
 
         /* The difference to be checked for convergence */
-        diff = 0;
+//        diff = 0;
         for (i = 0; i < num_vertices; i++) {
             /* The corresponding element of the H multiplication */
             double h = 0.0;
@@ -154,15 +144,31 @@ void pagerank(){
             }
             h *= alpha;
             pr[i] = h + one_Av + one_Iv;
-            diff += fabs(pr[i] - old_pr[i]);
+//            diff += fabs(pr[i] - old_pr[i]);
         }
+
+        double pr_sum = 0, old_sum = 0; 
+        cout << "    pr: ";
+        for (i = 0; i < num_vertices; i++) {
+            cout << pr[i] << " ";
+            pr_sum += pr[i];
+        }
+        //cout << endl << pr_sum << endl;
+        cout << endl << "old_pr: ";
+        for (i = 0; i < num_vertices; i++) {
+            cout << old_pr[i] << " ";
+            old_sum += old_pr[i];
+        }
+        cout << endl;
+        //cout << endl << old_sum << endl;
+
         num_iterations++;
+        if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
+        time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+        printf("Iter Time: %f sec\n",time);
+        printf("Iter: %d Diff: %f \n\n", num_iterations, diff);
     }
 
-    if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
-    time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
-    printf("Total Time: %f sec\n",time);
-    printf("Iter: %d Diff: %f \n",num_iterations,diff);
 
 }
 
