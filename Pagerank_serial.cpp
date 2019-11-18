@@ -22,7 +22,7 @@ mpirun -np <no. of Processors> ./a.out
 */
 
 const double DEFAULT_ALPHA = 0.85;
-const double DEFAULT_CONVERGENCE = 0.00001;
+const double DEFAULT_CONVERGENCE = 0.001;
 const unsigned long DEFAULT_MAX_ITERATIONS = 100; //10000;
 int trace = 1;
 
@@ -40,7 +40,7 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
         stringstream lineStream(line);
         size_t src, dest;
         lineStream >> src >> dest;
-        offsets[dest]++;
+        offsets[dest+1]++;
         if (prev != src) {
             prev++;
             for (; prev < src; prev++)
@@ -65,13 +65,13 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
         stringstream lineStream(line2);
         size_t src, dest;
         lineStream >> src >> dest;
+
         if(dest > 0)
-            edgesDest[offsets[dest-1] + temp_offsets[dest]] = src;
+            edgesDest[offsets[dest] + temp_offsets[dest]] = src;
         else
             edgesDest[temp_offsets[dest]] = src;    
         temp_offsets[dest]++;
     }
-
 
 
     // for(int kk=count ; kk <num_edges; kk++ ){
@@ -112,7 +112,7 @@ void pagerank(){
     pr = (double *) calloc(num_vertices , sizeof(double));
     old_pr = (double *) calloc(num_vertices , sizeof(double));
     edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
-    offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
+    offsets = (size_t *) calloc(num_vertices + 1,  sizeof(size_t));
     recip_offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
 
     read_matrix(file_matrix, edgesDest, offsets, recip_offsets,num_vertices);
@@ -129,7 +129,7 @@ void pagerank(){
 
     if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
     // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
-    while (diff > convergence && num_iterations < max_iterations && fabs(pre_diff-diff) > 0.0000001 ) {
+    while (diff > convergence && num_iterations < max_iterations && fabs(pre_diff-diff) > 0.00001 ) {
 
         sum_pr = 0;
         dangling_pr = 0;
@@ -173,24 +173,24 @@ void pagerank(){
         /* The difference to be checked for convergence */
 
         for (i = 0; i < num_vertices; i++) {
-            /* The corresponding element of the H multiplication */
+            pr[i] = one_Av + one_Iv;
+        }
+
+        for (i = 0; i < num_vertices; i++) {
             double h = 0.0;
+            double h_v = (recip_offsets[i+1]-recip_offsets[i])
+                ? 1.0 / (recip_offsets[i+1]-recip_offsets[i])
+                : 0.0;
+            h = alpha * h_v * old_pr[i];
             for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
-                /* The current element of the H vector */
-                double h_v = (recip_offsets[edgesDest[ci]+1]-recip_offsets[edgesDest[ci]])
-                    ? 1.0 / (recip_offsets[edgesDest[ci]+1]-recip_offsets[edgesDest[ci]])
-                    : 0.0;
-                h += h_v * old_pr[edgesDest[ci]];
+                pr[edgesDest[ci]] += h;
             }
-            h *= alpha;
-            pr[i] = h + one_Av + one_Iv;
-//            diff += fabs(pr[i] - old_pr[i]);
         }
 
 /*
         double pr_sum = 0, old_sum = 0; 
         cout << "    pr: ";
-        for (i = 0; i < num_vertices; i++) {
+        for (i = 0; i < 5; i++) {
             cout << pr[i] << " ";
             pr_sum += pr[i];
         }
