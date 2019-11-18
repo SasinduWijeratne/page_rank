@@ -26,10 +26,13 @@ const double DEFAULT_CONVERGENCE = 0.00001;
 const unsigned long DEFAULT_MAX_ITERATIONS = 100; //10000;
 int trace = 1;
 
-void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
+void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, size_t *recip_offsets, int num_vertices){
     istream *infile;
     infile = new ifstream(filename.c_str());
     string line;
+
+    size_t* temp_offsets;
+    temp_offsets = (size_t *) calloc((num_vertices) , sizeof(size_t));
 
     size_t count = 0;
     size_t prev = -1;
@@ -37,16 +40,45 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
         stringstream lineStream(line);
         size_t src, dest;
         lineStream >> src >> dest;
+        offsets[dest]++;
         if (prev != src) {
             prev++;
             for (; prev < src; prev++)
-                offsets[prev] = count;
-            offsets[src] = count;
+                recip_offsets[prev] = count;
+            recip_offsets[src] = count;
             prev = src;
         }
-        edgesDest[count] = dest;
         count++;
     }
+
+    for(int kk=0; kk < num_vertices; kk++){
+        if(kk > 0)
+            offsets[kk] = offsets[kk-1] + offsets[kk];
+            // printf("%d\n", offsets[kk]);
+    }
+
+    istream *infile2;
+    infile2 = new ifstream(filename.c_str());
+    string line2;
+
+    while (getline(*infile2, line2)){
+        stringstream lineStream(line2);
+        size_t src, dest;
+        lineStream >> src >> dest;
+        if(dest > 0)
+            edgesDest[offsets[dest-1] + temp_offsets[dest]] = src;
+        else
+            edgesDest[temp_offsets[dest]] = src;    
+        temp_offsets[dest]++;
+    }
+
+
+
+    // for(int kk=count ; kk <num_edges; kk++ ){
+    //    printf("%d\n",edgesDest[kk] );
+    // }
+
+    free(temp_offsets);
 }
 
 void pagerank(){
@@ -76,14 +108,18 @@ void pagerank(){
     fclose(fp);
 
     double *pr, *old_pr;
-    size_t *edgesDest, *offsets;
+    size_t *edgesDest, *offsets, *recip_offsets;
     pr = (double *) calloc(num_vertices , sizeof(double));
     old_pr = (double *) calloc(num_vertices , sizeof(double));
     edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
     offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
+    recip_offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
 
-    offsets[num_vertices] = num_edges;
-    read_matrix(file_matrix, edgesDest, offsets);
+    read_matrix(file_matrix, edgesDest, offsets, recip_offsets,num_vertices);
+
+    // for(int hh = 0; hh < num_vertices; hh++){
+    //     printf("%zu %zu\n",recip_offsets[hh],offsets[hh]);
+    // }
     
     pr[0] = 1;
 
@@ -142,8 +178,8 @@ void pagerank(){
             double h = 0.0;
             for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
                 /* The current element of the H vector */
-                double h_v = (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
-                    ? 1.0 / (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
+                double h_v = (recip_offsets[edgesDest[ci]+1]-recip_offsets[edgesDest[ci]])
+                    ? 1.0 / (recip_offsets[edgesDest[ci]+1]-recip_offsets[edgesDest[ci]])
                     : 0.0;
                 h += h_v * old_pr[edgesDest[ci]];
             }
