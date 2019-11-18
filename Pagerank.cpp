@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 #define NUM_WORKERS 4
-#define PREPROCESSING 0
+#define PREPROCESSING 1
 #define MODE 0 // 0 - ring 1 - s2c2
 /*mpic++ your_code_file.c
 Execution
@@ -73,7 +73,7 @@ void read_partition_write(size_t *offsets, size_t *edgesDest,int offset_size, in
     int global_count = 0;
     int internal_count = 0;
 
-    while (end_point < offsets[offset_size]){
+    while (end_point < offsets[offset_size] && partition_number < NUM_WORKERS){
         sprintf(filename, "partition%d.txt", partition_number);
         f = fopen(filename, "w");
         internal_count = 0;
@@ -403,7 +403,7 @@ int main(){
 //    edgesDest.resize(num_edges);
 //    offsets.resize(num_vertices + 1);
 
-    // offsets[num_vertices] = num_edges;
+    offsets[num_vertices] = num_edges;
 
     read_matrix(file_matrix, edgesDest, offsets, recip_offsets, num_vertices + 1, num_edges);
 
