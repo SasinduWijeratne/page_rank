@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 #define NUM_WORKERS 4
-#define PREPROCESSING 1
+#define PREPROCESSING 0
 #define MODE 0 // 0 - ring 1 - s2c2
 /*mpic++ your_code_file.c
 Execution
@@ -25,7 +25,7 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
+const unsigned long DEFAULT_MAX_ITERATIONS = 100;
 int trace = 1;
 
 void read_partition_edges(char filename[], size_t* edgesDest){
@@ -233,7 +233,7 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
 
 }
 #if PREPROCESSING == 0
-void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
+void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request requests[]){
 
     double convergence = DEFAULT_CONVERGENCE;
     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
@@ -266,9 +266,9 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     double *pr, *old_pr;
     size_t *edgesDest, *offsets, *recipoffsets;
 
-    edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
-    offsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
-    recipoffsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
+    edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
+    offsets = (size_t *) calloc((tot_num_vertices) , sizeof(size_t));
+    recipoffsets = (size_t *) calloc((tot_num_vertices) , sizeof(size_t));
 
     pr = (double *) calloc(num_vertices , sizeof(double));
     old_pr = (double *) calloc(num_vertices , sizeof(double));
@@ -285,23 +285,31 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     int num_iterations = 0;
     double diff = 1;
     double diff_prev = -1;
-
+    int exit_flag = 0;
+    // (fabs(diff - diff_prev) > convergence)
 
     // // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
-    while ((num_iterations < max_iterations) && (fabs(diff - diff_prev)/diff > convergence)) {
-        // printf("id: %d\n",id);
+    while ((num_iterations < max_iterations) && (exit_flag == 0) ) {
+        if(fabs(diff - diff_prev) <= convergence){
+            // printf("Hit3 %d\n", id);
+            tag = 51;
+            exit_flag = 1;
+        }
         diff_prev = diff;
         diff = 0;
         for(int sas_i = 0; sas_i < proc_n; sas_i++){
-
+            // printf("tag: %d %d \n",id, tag);
             sum_pr = 0;
             dangling_pr = 0;
 
             for (size_t k = 0; k < num_vertices; k++) {
                 double cpr = pr[k];
                 sum_pr += cpr;
-                if (offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k+1] - offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k] == 0)
-                    dangling_pr += cpr;
+                if((num_vertices*((id + proc_n - sas_i)%proc_n)+k+1) < tot_num_vertices-1){
+                    size_t temp_diff_offset = offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k+1] - offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k];
+                    if (temp_diff_offset == 0) // Place 1
+                        dangling_pr += cpr;
+                }
            }
 
 
@@ -336,14 +344,15 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                 /* The corresponding element of the H multiplication */
                 double h = 0.0;
                 int abs_i = num_vertices*((id + proc_n - sas_i)%proc_n) + i;
-
-                for (size_t ci = offsets[abs_i]; ci < offsets[abs_i+1]; ci++) {
-                //     /* The current element of the H vector */
-                    if((edgesDest[ci] >= num_vertices*((id + proc_n - sas_i)%proc_n)) && (edgesDest[ci] < num_vertices*((id + proc_n - sas_i)%proc_n+1))){
-                        double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
-                                    ? 1.0 / (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
-                                    : 0.0;
-                        h += h_v * old_pr[edgesDest[ci]%proc_n];                        
+                if(abs_i < tot_num_vertices-1){
+                    for (size_t ci = offsets[abs_i]; ci < offsets[abs_i+1]; ci++) {
+                        /* The current element of the H vector */
+                        if((edgesDest[ci] >= num_vertices*((id + proc_n - sas_i)%proc_n)) && (edgesDest[ci] < num_vertices*((id + proc_n - sas_i)%proc_n+1))){
+                            double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
+                                        ? 1.0 / (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
+                                        : 0.0;
+                            h += h_v * old_pr[edgesDest[ci]%proc_n];                        
+                        }
                     }
 
                 }
@@ -356,17 +365,36 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
             
                 // t1 = MPI_Wtime();  
                 // printf("id: %d\n",id);
-                MPI_Send (&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
-                MPI_Recv (&pr[0], num_vertices, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+                // MPI_Send (&pr[0], num_vertices+1, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
+                // MPI_Recv (&pr[0], num_vertices+1, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
+                MPI_Isend(&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &requests[(id+1)%proc_n]);
+                MPI_Wait(&requests[(id+1)%proc_n], &status);
+                int use_id = (id == 0)? (proc_n-1): (id-1)%proc_n;
+                MPI_Irecv(&pr[0], num_vertices, MPI_INT, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[use_id]);
+                MPI_Wait(&requests[use_id], &status);
+                if (status.MPI_TAG == 51){
+                    // printf("Hit2 %d\n", id);
+                    tag = 51;
+                    exit_flag = 1;
+                }
                 
                 // t2 = MPI_Wtime();
                 // printf("\nRound trip(s): %f\n\n", t2-t1);    
             }
             else {
                 // printf("id: %d\n",id);
-                MPI_Recv (&pr[0], num_vertices, MPI_INT, (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-                MPI_Send (&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD); 
+                MPI_Irecv(&pr[0], num_vertices, MPI_INT,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[(id-1)%proc_n]);
+                MPI_Wait(&requests[(id-1)%proc_n], &status);
+                if (status.MPI_TAG == 51){
+                    // printf("Hit2 %d\n", id);
+                    tag = 51;
+                    exit_flag = 1;
+                }
+                MPI_Isend(&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &requests[(id+1)%proc_n]);
+                MPI_Wait(&requests[(id+1)%proc_n], &status);
             }
+
+             MPI_Barrier(MPI_COMM_WORLD);
 
         }
             // printf("diff: %f\n",diff);
@@ -377,6 +405,7 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
             // cout << num_iterations << ": ";
         // }
     }
+    // printf("I exit: %d %f %f\n", id, diff, diff_prev);
 
 
 }
@@ -437,7 +466,7 @@ int main(){
 
     int tag = 50;
     MPI_Status status;  
-
+    MPI_Request request[NUM_WORKERS];
     MPI_Init (NULL , NULL);
     int my_rank, proc_n;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
@@ -445,7 +474,7 @@ int main(){
     // printf("%d\n",proc_n);
 
     //ring model
-    ring_pagerank(my_rank,status,proc_n,tag);
+    ring_pagerank(my_rank,status,proc_n,tag, request);
 
     MPI_Finalize();
 
@@ -514,7 +543,7 @@ int main(int argc, char** argv) {
     MPI_Request request;
     MPI_Request requests[16];
     int flag;
-
+    MPI_Request request[NUM_WORKERS];
     MPI_Init (&argc , &argv);
 
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
