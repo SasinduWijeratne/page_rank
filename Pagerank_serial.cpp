@@ -147,6 +147,7 @@ void pagerank(){
             diff = 999;
         } else {
             /* Normalize so that we start with sum equal to one */
+            pre_diff = diff;
             diff = 0;
             
             double tmp;
@@ -170,8 +171,6 @@ void pagerank(){
         double one_Iv = (1 - alpha) * sum_pr / num_vertices;
 
         /* The difference to be checked for convergence */
-        pre_diff = diff;
-        diff = 0;
 
         for (i = 0; i < num_vertices; i++) {
             /* The corresponding element of the H multiplication */
