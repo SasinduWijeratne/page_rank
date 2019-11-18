@@ -240,7 +240,7 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
     fscanf(fp, "%lu %lu %lu", &num_edges,&tot_num_vertices, &num_vertices);
     fclose(fp);
 
-    double *pr, *old_pr;
+    double  *pr, *old_pr;
     size_t *edgesDest, *offsets, *recipoffsets;
 
     edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
@@ -249,6 +249,9 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
 
     pr = (double *) calloc(num_vertices , sizeof(double));
     old_pr = (double *) calloc(num_vertices , sizeof(double));
+
+    double pr1;
+    pr1 = (double *) malloc(num_vertices * sizeof(double));
 
     read_partition_edges(filename,edgesDest);
     read_partition_offset(filename1,offsets);
@@ -360,7 +363,7 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
             }
             else {
                 // printf("id: %d\n",id);
-                MPI_Irecv(&pr[0], num_vertices, MPI_INT,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[(id-1)%proc_n]);
+                MPI_Irecv(&pr1[0], num_vertices, MPI_INT,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[(id-1)%proc_n]);
                 MPI_Wait(&requests[(id-1)%proc_n], &status);
                 if (status.MPI_TAG == 51){
                     // printf("Hit2 %d\n", id);
@@ -369,6 +372,9 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
                 }
                 MPI_Isend(&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD, &requests[(id+1)%proc_n]);
                 MPI_Wait(&requests[(id+1)%proc_n], &status);
+                double * swap = pr;
+                pr = pr1;
+                pr1 = swap;
             }
 
              MPI_Barrier(MPI_COMM_WORLD);
