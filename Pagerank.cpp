@@ -74,6 +74,7 @@ void read_partition_write(size_t *offsets, size_t *edgesDest,int offset_size, in
     int internal_count = 0;
 
     while (end_point < offsets[offset_size] && partition_number < NUM_WORKERS){
+        // printf("%d\n",partition_number);
         sprintf(filename, "partition%d.txt", partition_number);
         f = fopen(filename, "w");
         internal_count = 0;
@@ -81,25 +82,30 @@ void read_partition_write(size_t *offsets, size_t *edgesDest,int offset_size, in
             end_point = offsets[global_count];
             // printf("%d,%d,%d\n",start_point,end_point,edge_size); exit(0);
             if(end_point == offsets[offset_size]){
+                // printf("Hit1\n");
                 for(int kk= start_point; kk < end_point; kk++){
-                    fprintf(f, "%zu\n", edgesDest[kk]);
+                    if(kk < edge_size*NUM_WORKERS)
+                        fprintf(f, "%zu\n", edgesDest[kk]);
                 }
                 break;
             } 
 
             if((end_point - start_point) >= edge_size){
                 if(internal_count == 0){
+                    // printf("Hit2\n");
                     for(int kk= start_point; kk < end_point; kk++){
                         fprintf(f, "%zu\n", edgesDest[start_point + kk]);
                     }
                 }
                 else{
                     if((end_point - start_point) < 1.5*edge_size){
+                        // printf("Hit3\n");
                         for(int kk= start_point; kk < end_point; kk++){
                             fprintf(f, "%zu\n", edgesDest[kk]);
                         }
                     }
                     else{
+                        // printf("Hit4\n");
                         for(int kk= start_point; kk < offsets[global_count-1]; kk++){
                             fprintf(f, "%zu\n", edgesDest[kk]); 
                         }
