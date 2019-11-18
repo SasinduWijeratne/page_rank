@@ -159,20 +159,24 @@ int main(int argc, char** argv) {
     fclose(fp);
 
     double *pr, *old_pr;
-    size_t *edgesDest, *offsets;
+    size_t *edgesDest, *offsets, *recip_offsets;
 
     pr = (double *) calloc(tot_num_vertices , sizeof(double));
     old_pr = (double *) calloc(tot_num_vertices , sizeof(double));
 
     if(my_rank > 0){
         char filename1[20];
+        char filename2[20];
         sprintf(filename1, "offset.txt");
+        sprintf(filename2, "recipoffset.txt");
         edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
         offsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
+        recip_offsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
         char filename[20];
         sprintf(filename, "partition%d.txt", my_rank-1);
         read_partition_edges(filename,edgesDest);
         read_partition_offset(filename1,offsets);
+        read_partition_offset(filename2,recip_offsets);
         
 
     }
@@ -260,8 +264,8 @@ int main(int argc, char** argv) {
                 double h = 0.0;
                 for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
                     /* The current element of the H vector */
-                    double h_v = (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
-                        ? 1.0 / (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
+                    double h_v = (recip_offsets[edgesDest[ci]+1]-recip_offsets[edgesDest[ci]])
+                        ? 1.0 / (recip_offsets[edgesDest[ci]+1]-recip_offsets[edgesDest[ci]])
                         : 0.0;
                     h += h_v * old_pr[edgesDest[ci]];
                 }
