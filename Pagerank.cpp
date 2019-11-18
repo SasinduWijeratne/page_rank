@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 #define NUM_WORKERS 4
-#define PREPROCESSING 1
+#define PREPROCESSING 0
 #define MODE 0 // 0 - ring 1 - s2c2
 /*mpic++ your_code_file.c
 Execution
@@ -160,7 +160,18 @@ void read_offset_write( size_t *offsets, int tot_size){
     fclose(f);
 }
 
-void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, int num_vertices, int num_edges){
+void read_recipoffset_write( size_t *offsets, int tot_size){ 
+    FILE *f;
+    char filename[20];
+    sprintf(filename, "recipoffset.txt");
+    f = fopen(filename, "w");
+    for(int i = 0; i < tot_size; i++ ){
+        fprintf(f, "%zu\n", offsets[i]);
+    }
+    fclose(f);
+}
+
+void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, size_t *recip_offsets, int num_vertices, int num_edges){
     istream *infile;
     infile = new ifstream(filename.c_str());
     string line;
@@ -175,6 +186,14 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, int
         size_t src, dest;
         lineStream >> src >> dest;
         offsets[dest]++;
+        if (prev != src) {
+            prev++;
+            for (; prev < src; prev++)
+                recip_offsets[prev] = count;
+            recip_offsets[src] = count;
+            prev = src;
+        }
+        count++;
     }
 
     for(int kk=0; kk < num_vertices; kk++){
@@ -229,24 +248,28 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     string file_metadata = "partition.metadata";
     char filename[20];
     char filename1[20];
+    char filename2[20];
     sprintf(filename, "partition%d.txt", id);
     sprintf(filename1, "offset.txt");
+    sprintf(filename2, "recipoffset.txt");
 
     FILE *fp = fopen(file_metadata.c_str(), "r");
     fscanf(fp, "%lu %lu %lu", &num_edges,&tot_num_vertices, &num_vertices);
     fclose(fp);
 
     double *pr, *old_pr;
-    size_t *edgesDest, *offsets;
+    size_t *edgesDest, *offsets, *recipoffsets;
 
     edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
     offsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
+    recipoffsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
 
     pr = (double *) calloc(num_vertices , sizeof(double));
     old_pr = (double *) calloc(num_vertices , sizeof(double));
 
     read_partition_edges(filename,edgesDest);
     read_partition_offset(filename1,offsets);
+    read_partition_offset(filename2,recipoffsets);
 
 //    pr.resize(num_vertices);
 //    old_pr.resize(num_vertices);
@@ -265,15 +288,15 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
         diff = 0;
         for(int sas_i = 0; sas_i < proc_n; sas_i++){
 
-	        sum_pr = 0;
-	        dangling_pr = 0;
+            sum_pr = 0;
+            dangling_pr = 0;
 
-	        for (size_t k = 0; k < num_vertices; k++) {
-	            double cpr = pr[k];
-	            sum_pr += cpr;
-	            if (offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k+1] - offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k] == 0)
-	                dangling_pr += cpr;
-	       }
+            for (size_t k = 0; k < num_vertices; k++) {
+                double cpr = pr[k];
+                sum_pr += cpr;
+                if (offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k+1] - offsets[num_vertices*((id + proc_n - sas_i)%proc_n)+k] == 0)
+                    dangling_pr += cpr;
+           }
 
 
             diff += sum_pr;
@@ -290,19 +313,19 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                     old_pr[i] = pr[i];
                 }
             }
-	        /*
-	         * After normalisation the elements of the pagerank vector sum
-	         * to one
-	         */
-	        sum_pr = 1;
-	        
-	        /* An element of the A x I vector; all elements are identical */
-	        double one_Av = alpha * dangling_pr / (num_vertices*proc_n);
+            /*
+             * After normalisation the elements of the pagerank vector sum
+             * to one
+             */
+            sum_pr = 1;
+            
+            /* An element of the A x I vector; all elements are identical */
+            double one_Av = alpha * dangling_pr / (num_vertices*proc_n);
 
-	        /* An element of the 1 x I vector; all elements are identical */
-	        double one_Iv = (1 - alpha) * sum_pr / (num_vertices*proc_n);
+            /* An element of the 1 x I vector; all elements are identical */
+            double one_Iv = (1 - alpha) * sum_pr / (num_vertices*proc_n);
 
-	        /* The difference to be checked for convergence */
+            /* The difference to be checked for convergence */
             for (i = 0; i < num_vertices; i++) {
                 /* The corresponding element of the H multiplication */
                 double h = 0.0;
@@ -311,8 +334,8 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                 for (size_t ci = offsets[abs_i]; ci < offsets[abs_i+1]; ci++) {
                 //     /* The current element of the H vector */
                     if((edgesDest[ci] >= num_vertices*((id + proc_n - sas_i)%proc_n)) && (edgesDest[ci] < num_vertices*((id + proc_n - sas_i)%proc_n+1))){
-                        double h_v = (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
-                                    ? 1.0 / (offsets[edgesDest[ci]+1]-offsets[edgesDest[ci]])
+                        double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
+                                    ? 1.0 / (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
                                     : 0.0;
                         h += h_v * old_pr[edgesDest[ci]%proc_n];                        
                     }
@@ -339,8 +362,8 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                 MPI_Send (&pr[0], num_vertices, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD); 
             }
 
-	    }
-	        // printf("diff: %f\n",diff);
+        }
+            // printf("diff: %f\n",diff);
         // printf("%d %f\n",num_iterations,fabs(diff - diff_prev)/diff);
         num_iterations++;
         MPI_Barrier(MPI_COMM_WORLD);
@@ -364,7 +387,7 @@ int main(){
     //vector<size_t> edgesDest;
     //vector<size_t> offsets;
 
-    size_t *edgesDest, *offsets;
+    size_t *edgesDest, *offsets, *recip_offsets;
 
     size_t num_vertices;
     size_t num_edges;
@@ -375,15 +398,17 @@ int main(){
 
     edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
     offsets = (size_t *) calloc((num_vertices + 1) , sizeof(size_t));
+    recip_offsets = (size_t *) calloc((num_vertices + 1) , sizeof(size_t));
 
 //    edgesDest.resize(num_edges);
 //    offsets.resize(num_vertices + 1);
 
     // offsets[num_vertices] = num_edges;
 
-    read_matrix(file_matrix, edgesDest, offsets, num_vertices + 1, num_edges);
+    read_matrix(file_matrix, edgesDest, offsets, recip_offsets, num_vertices + 1, num_edges);
 
     read_offset_write(offsets,num_vertices);
+    read_recipoffset_write(recip_offsets,num_vertices);
 
     read_partition_write(offsets, edgesDest,num_vertices, num_edges/NUM_WORKERS);
 
@@ -438,7 +463,7 @@ int main(){
 
 //     int tag = 50;
 //     MPI_Status status;  
-// 	MPI_Request request;
+//  MPI_Request request;
 //     MPI_Request requests[32];
 
 //     MPI_Init (NULL , NULL);
@@ -548,5 +573,4 @@ int main(int argc, char** argv) {
 
 
 #endif
-
 
