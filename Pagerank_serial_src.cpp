@@ -151,9 +151,10 @@ void pagerank(){
         }
 
 /*
+        cout << one_Av << " " << one_Iv << endl;
         double pr_sum = 0, old_sum = 0; 
         cout << "    pr: ";
-        for (i = 0; i < num_vertices; i++) {
+        for (i = 0; i < 5; i++) {
             cout << pr[i] << " ";
             pr_sum += pr[i];
         }
