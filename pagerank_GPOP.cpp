@@ -19,15 +19,92 @@ Execution
 
 mpirun -np <no. of Processors> ./a.out
 */
+#define PREPROCESSING 0
+
 #define NUM_WORKERS 4
-#define _PER_VERTICES 7499
-#define _PER_VERTICESX2 _PER_VERTICES*2
-#define NUM_VERTICES _PER_VERTICES*NUM_WORKERS
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
+const unsigned long DEFAULT_MAX_ITERATIONS = 100;
 int trace = 1;
+
+void read_partition_offset(char filename[], size_t* offsets){
+
+    istream *infile;
+
+    infile = new ifstream(filename);
+
+    string line;
+
+    int count = 0;
+    while (getline(*infile, line)){
+        int num = strtol(line.c_str(), NULL, 10);
+        offsets[count] = num;
+        count++;
+    }
+
+}
+
+void read_partition_edges(char filename[], size_t* edgesDest){
+
+    istream *infile;
+
+    infile = new ifstream(filename);
+
+    string line;
+
+    int count = 0;
+    while (getline(*infile, line)){
+        int num = strtol(line.c_str(), NULL, 10);
+        edgesDest[count] = num;
+        count++;
+    }
+
+}
+
+void partition_meta(int edge_size, int offset_size, int per_vertex){
+    FILE *f;
+    char filename[25];
+    sprintf(filename, "gpoppartition.metadata");
+    f = fopen(filename, "w");
+    fprintf(f, "%d %d %d\n", edge_size,offset_size,per_vertex);
+    fclose(f);
+}
+
+// read_partition_write(offsets, edgesDest,num_edges, num_edges/NUM_WORKERS);
+void read_partition_write(size_t *offsets, size_t *edgesDest,int offset_size, int edge_size, int num_vertices){ // edge_size = one partition size
+    FILE *f;
+    char filename[20];
+    int start_point = 0;
+    int end_point = 0;
+    int partition_number = 0;
+    int global_count = 0;
+    int internal_count = 0;
+
+    int per_worker = num_vertices/NUM_WORKERS;
+    for(int i=0; i < NUM_WORKERS; i++){
+        sprintf(filename, "gpoppartition%d.txt", i);
+        f = fopen(filename, "w");
+        int start = offsets[i*per_worker];
+        int end =  offsets[(i+1)*per_worker];
+        for(int j=start; j < end; j++){
+            fprintf(f, "%zu\n", edgesDest[j]);
+        }
+        fclose(f);
+    }
+
+}
+
+void read_offset_write( size_t *offsets, int tot_size){ 
+    FILE *f;
+    char filename[20];
+    sprintf(filename, "gpopoffset.txt");
+    f = fopen(filename, "w");
+    for(int i = 0; i < tot_size; i++ ){
+        fprintf(f, "%zu\n", offsets[i]);
+    }
+    fclose(f);
+}
 
 void read_vector(const string &filename, int &len, vector<size_t> &num_outgoing){
 
@@ -48,34 +125,30 @@ void read_vector(const string &filename, int &len, vector<size_t> &num_outgoing)
     }
 }
 
-void read_matrix(const string &filename, int len, vector< vector<size_t> > &rows){
-
+void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
     istream *infile;
-
     infile = new ifstream(filename.c_str());
-
     string line;
 
-    rows.resize(len);
-    int count = 0;
+    size_t count = 0;
+    size_t prev = -1;
     while (getline(*infile, line)){
-        stringstream  lineStream(line);
-        size_t value;
-
-        while(lineStream >> value)
-        {
-            rows[count].push_back(value);
-            // if(value != 0)
-            //     printf("%d\n",value);
-
+        stringstream lineStream(line);
+        size_t src, dest;
+        lineStream >> src >> dest;
+        if (prev != src) {
+            prev++;
+            for (; prev < src; prev++)
+                offsets[prev] = count;
+            offsets[src] = count;
+            prev = src;
         }
+        edgesDest[count] = dest;
         count++;
     }
 }
-
+#if PREPROCESSING == 0
 void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
-    vector<double> pr;
-    vector<double> count_pr;
 
     double convergence = DEFAULT_CONVERGENCE;
     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
@@ -83,104 +156,112 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
     double sum_pr;
     double dangling_pr;
     double alpha = DEFAULT_ALPHA;
-    vector<double> old_pr;
-    vector<size_t>::iterator ci;
+
     int i,j;
 
-    sum_pr = 1;
+    sum_pr = 0;
     dangling_pr = 0;
+
+    size_t num_vertices;
+    size_t tot_num_vertices;
+    size_t num_edges;
 
     // string file_vector = "vector" + to_string(id) +".txt";
     // string file_matrix = "mat" + to_string(id) +".txt";
-    string file_vector = "vector0.txt";
-    string file_matrix = "mat0.txt";
+    string file_metadata = "gpoppartition.metadata";
+    char filename[20];
+    char filename1[20];
+    sprintf(filename, "gpoppartition%d.txt", id);
+    sprintf(filename1,"gpopoffset.txt");
 
-    vector< vector<size_t> > rows;
-    vector<size_t> num_outgoing;
-    int len;
+    FILE *fp = fopen(file_metadata.c_str(), "r");
+    fscanf(fp, "%lu %lu %lu", &num_edges,&tot_num_vertices, &num_vertices);
+    fclose(fp);
 
-    read_vector(file_vector,len, num_outgoing);
-    read_matrix(file_matrix,len,rows);
+    double  *pr, *old_pr;
+    size_t *edgesDest, *offsets;
 
-    int num_rows = len;
-    pr.resize(len);
-    count_pr.resize(len);
-    old_pr.resize(len);
+    edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
+    offsets = (size_t *) calloc((tot_num_vertices) , sizeof(size_t));
+
+    pr = (double *) calloc(num_vertices , sizeof(double));
+    old_pr = (double *) calloc(num_vertices , sizeof(double));
+
+    read_partition_edges(filename,edgesDest);
+    read_partition_offset(filename1,offsets);
+
     int num_iterations = 0;
-    double diff = 1;
+    double diff = 99;
     double diff_i = 1;
+    double diff_i_old = -1;
     old_pr[0] = 1;
     pr[0] = 1;
 
-    double *sending_arr = (double *)malloc((NUM_WORKERS * _PER_VERTICESX2 + NUM_WORKERS) * sizeof(double *)); 
-    double *receiving_arr = (double *)malloc((NUM_WORKERS * _PER_VERTICESX2 + NUM_WORKERS) * sizeof(double *)); 
+    double *sending_arr = (double *)malloc((tot_num_vertices + NUM_WORKERS) * sizeof(double)); 
+    double *receiving_arr = (double *)malloc((tot_num_vertices + NUM_WORKERS) * sizeof(double)); 
 
 
-    while (diff_i > convergence && num_iterations < max_iterations){
-
+    while (fabs(diff_i) > convergence && num_iterations < max_iterations && fabs(diff_i_old - diff_i) > 0.0000001){
         if(num_iterations == 0){
-            for (i; i < old_pr.size(); ++i)
-            {
-                old_pr[i] = 1/num_outgoing[i];
-            }           
+            double temp_init =   1.0/tot_num_vertices;
+            if(temp_init > 0.00000000000000000001){
+                for (i = 0; i < num_vertices; ++i)
+                    old_pr[i] = temp_init;  
+            }
+            else{
+                old_pr[0] = 1;
+            }
+
         }
     
     // Scatter Phase
-    for(i=0; i<NUM_WORKERS; i++){
-        for(j=0; j<_PER_VERTICESX2; j++){
-            sending_arr[i * _PER_VERTICESX2 + j] = 0;
-        }
-    }
-    for (i = 0; i < _PER_VERTICES; i++) {
-        /* The corresponding element of the H multiplication */
-        double deg = num_outgoing[i];
-        for (ci = rows[i].begin(); ci != rows[i].end(); ci++) {
-            int pos_ = *ci;
-            double temp_pr = (deg) ? 1.0 / deg : 0.0;
-            // if (num_iterations == 0 && trace) {
-            //     cout << "h[" << i << "," << *ci << "]=" << h_v << endl;
-            // }
-            int scatter_partition = pos_/_PER_VERTICES;
-            int relative_pos = pos_%_PER_VERTICES;
-            sending_arr[scatter_partition * _PER_VERTICESX2 + 2*relative_pos] += (temp_pr*(old_pr[i]/sum_pr));
 
-            sending_arr[scatter_partition * _PER_VERTICESX2 + 2*relative_pos+1] += 1;
+        for(j=0; j<tot_num_vertices; j++){
+            sending_arr[j] = 0;
+        }
+        for (i = 0; i < num_vertices; i++) {
+            double temp_pr = (offsets[i+1]-offsets[i]) ? 1.0 / (offsets[i+1]-offsets[i]) : 0.0;
+
+            for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
+                sending_arr[edgesDest[ci]] += (temp_pr*old_pr[i]);
+            }
         }
 
-    }
-    sending_arr[_PER_VERTICESX2*NUM_WORKERS + 1] = diff;
+    for(i = 0; i < NUM_WORKERS; i++)
+        sending_arr[num_vertices*(i+1)+i] = diff;
+
+    int status_all2all = MPI_Alltoall(&sending_arr[0], num_vertices+1, MPI_DOUBLE, &receiving_arr[0], num_vertices+1, MPI_DOUBLE, MPI_COMM_WORLD);
     MPI_Barrier(MPI_COMM_WORLD);
-    int status_all2all = MPI_Alltoall(sending_arr, _PER_VERTICESX2+1, MPI_DOUBLE, receiving_arr, _PER_VERTICESX2+1, MPI_DOUBLE, MPI_COMM_WORLD);
+    diff_i_old = diff_i;
     diff_i = 0;
+    // printf("id: %d diff %f\n",id, diff );
     for(i = 0; i < NUM_WORKERS; i++){
-        diff_i += receiving_arr[i*_PER_VERTICESX2 + 1];
+        diff_i += receiving_arr[(i+1)*num_vertices+i];
     }
+    // printf("id: %d i_diff: %f\n",id, diff_i);
 
     //Gather Phase
-    old_pr = pr;
     sum_pr = 0;
-    for (size_t k = 0; k < pr.size(); k++) {
+    for (size_t k = 0; k < num_vertices; k++) {
         double cpr = pr[k];
         sum_pr += cpr;
     }
-    if(sum_pr == 0) sum_pr = 1; 
+    if(sum_pr == 0) sum_pr = 1; // Hack for test data
     diff = 0;
-    for(i=0; i < _PER_VERTICES; i++){
+    for(i=0; i < num_vertices; i++){
         pr[i] = 0;
-        count_pr[i] = 0;
         for(j=0; j < NUM_WORKERS; j++){
-            pr[i] += receiving_arr[j *_PER_VERTICESX2 +2*i];
-            count_pr[i] += receiving_arr[j *_PER_VERTICESX2 +2*i+1];
+            pr[i] += receiving_arr[j *(num_vertices+1) +i];
         }
-        if(count_pr[i] > 0)
-            pr[i] = ((1-alpha)/count_pr[i]) + alpha*pr[i];
-        else
-            pr[i] = alpha*pr[i];
+            pr[i] = ((1-alpha)/tot_num_vertices) + alpha*pr[i];
+
         diff += fabs(pr[i] - old_pr[i]/sum_pr);
     }
-    num_iterations++;
-    MPI_Barrier(MPI_COMM_WORLD);
 
+    for(i = 0; i < num_vertices; i++)
+        old_pr[i] = pr[i];
+
+    num_iterations++;
 
     }
     // for ( i = 0; i < pr.size(); ++i)
@@ -189,9 +270,35 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
     // }
 
 }
+#endif
 
 int main(){
+#if PREPROCESSING
 
+    string file_metadata = "graph.metadata";
+    string file_matrix = "graph.txt";
+
+    //vector<size_t> edgesDest;
+    //vector<size_t> offsets;
+
+    size_t *edgesDest, *offsets, *recip_offsets;
+
+    size_t num_vertices;
+    size_t num_edges;
+
+    FILE *fp = fopen(file_metadata.c_str(), "r");
+    fscanf(fp, "%lu %lu", &num_vertices, &num_edges);
+    fclose(fp);
+
+    edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
+    offsets = (size_t *) calloc((num_vertices + 1) , sizeof(size_t));
+
+    read_matrix(file_matrix,edgesDest,offsets);
+    read_offset_write(offsets,num_vertices);
+    read_partition_write(offsets, edgesDest,num_edges, num_edges/NUM_WORKERS, num_vertices);
+    partition_meta(num_edges, num_vertices,num_vertices/NUM_WORKERS);
+
+#else
     int tag = 50;
     MPI_Status status;  
 
@@ -213,6 +320,8 @@ int main(){
     //         if(*ci != 0)
     //             printf("num: %f %d\n",*ci, i);
     // }
+#endif
+
     return 0;
 }
 
