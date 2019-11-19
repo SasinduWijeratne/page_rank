@@ -132,15 +132,22 @@ void partition_meta(int edge_size, int offset_size, int per_vertex){
     fclose(f);
 }
 
-void read_offset_write( size_t *offsets, int tot_size){ 
+void read_offset_write(size_t *offsets, int tot_size){ 
     FILE *f;
     char filename[20];
-    sprintf(filename, "offset.txt");
-    f = fopen(filename, "w");
-    for(int i = 0; i < tot_size; i++ ){
-        fprintf(f, "%zu\n", offsets[i]);
+
+    size_t num_vertices_per_worker = tot_size / NUM_WORKERS;
+
+    for (int pid = 0; pid < NUM_WORKERS; pid++) {
+        sprintf(filename, "offset%d.txt", pid);
+        f = fopen(filename, "w");
+        size_t left, right;
+        left = num_vertices_per_worker*pid;
+        right = (pid == NUM_WORKERS - 1) ? tot_size : num_vertices_per_worker*(pid+1);
+        for (int i = left; i <= right; i++)
+            fprintf(f, "%zu\n", offsets[i]);  
+        fclose(f);
     }
-    fclose(f);
 }
 
 void read_recipoffset_write( size_t *offsets, int tot_size){ 
@@ -168,7 +175,7 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
         stringstream lineStream(line);
         size_t src, dest;
         lineStream >> src >> dest;
-        offsets[dest]++;
+        offsets[dest+1]++;
         if (prev != src) {
             prev++;
             for (; prev < src; prev++)
@@ -178,12 +185,13 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
         }
         count++;
     }
+    prev++;
+    for (; prev < num_vertices; prev++)
+        recip_offsets[prev] = count;
 
-    for(int kk=0; kk < num_vertices; kk++){
-        if(kk > 0)
-            offsets[kk] = offsets[kk-1] + offsets[kk];
-            // printf("%d\n", offsets[kk]);
-    }
+    offsets[0] = 0;
+    for(int kk = 1; kk < num_vertices; kk++)
+        offsets[kk] = offsets[kk-1] + offsets[kk];
 
     istream *infile2;
     infile2 = new ifstream(filename.c_str());
@@ -193,22 +201,12 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
         stringstream lineStream(line2);
         size_t src, dest;
         lineStream >> src >> dest;
-        if(dest > 0)
-            edgesDest[offsets[dest-1] + temp_offsets[dest]] = src;
-        else
-            edgesDest[temp_offsets[dest]] = src;    
+        edgesDest[offsets[dest] + temp_offsets[dest]] = src;
         temp_offsets[dest]++;
     }
-
-
-
-    // for(int kk=count ; kk <num_edges; kk++ ){
-    //    printf("%d\n",edgesDest[kk] );
-    // }
-
     free(temp_offsets);
-
 }
+
 #if PREPROCESSING == 0
 void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request requests[]){
 
@@ -420,9 +418,26 @@ int main(){
 //    edgesDest.resize(num_edges);
 //    offsets.resize(num_vertices + 1);
 
-    offsets[num_vertices] = num_edges;
+    //offsets[num_vertices] = num_edges;
 
     read_matrix(file_matrix, edgesDest, offsets, recip_offsets, num_vertices + 1, num_edges);
+
+    cout << "offsets: \n";
+    for (int k = 0; k <= num_vertices; k++)
+        cout << offsets[k] << " ";
+    cout << endl;
+
+    cout << "recip_offsets: \n";
+    for (int k = 0; k <= num_vertices; k++)
+        cout << recip_offsets[k] << " ";
+    cout << endl;
+
+    cout << "edgesDest: \n";
+    for (int k = 0; k < num_edges; k++)
+        cout << edgesDest[k] << " ";
+    cout << endl;
+    
+
 
     read_offset_write(offsets,num_vertices);
     read_recipoffset_write(recip_offsets,num_vertices);
