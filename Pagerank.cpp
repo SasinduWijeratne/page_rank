@@ -99,7 +99,7 @@ void read_offset_write(size_t *offsets, int tot_size){
         left = num_vertices_per_worker*pid;
         right = (pid == NUM_WORKERS - 1) ? tot_size : num_vertices_per_worker*(pid+1);
         for (int i = left; i <= right; i++)
-            fprintf(f, "%zu\n", offsets[i]);  
+            fprintf(f, "%zu\n", offsets[i] - offsets[left]);  
         fclose(f);
     }
 }
@@ -226,10 +226,11 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
 
 
         printf("[ID %d] Iter: %d Diff: %f \n", id, num_iterations, diff);
+/*
         for (int q = 0; q < num_vertices; q++)
             cout << "[ID " << id << "] " << pr[q] << " ";
         cout << endl << endl;
-
+*/
 
         if (num_iterations >= 1) {
             if (num_iterations >= 2)
@@ -258,19 +259,21 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
             right = (ring_partition_id == NUM_WORKERS - 1) ? tot_num_vertices : (tot_num_vertices/NUM_WORKERS)*(ring_partition_id+1);
             int current_partition_size = right - left;
 
+
             for (i = 0; i < num_vertices; i++) {
                 double h = 0.0;
                 for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
                     if(edgesDest[ci] >= left && edgesDest[ci] < right) {
-                            double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
+                        double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
                                         ? 1.0 / (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
                                         : 0.0;
-                            h += h_v * old_pr[edgesDest[ci]-left];                        
+                        h += h_v * old_pr[edgesDest[ci]-left];                        
                     }
                 }
                 h *= alpha;
                 pr[i] += h;
             }
+
 
             // if sas_i != proc_n 
             if (id%2 == 0) {
@@ -296,10 +299,16 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
 
                 MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &requests[(id+1)%proc_n]);
                 MPI_Wait(&requests[(id+1)%proc_n], &status);
+
+
                 double * swap = old_pr;
                 old_pr = pr1;
                 pr1 = swap;
+
             }
+
+
+
             diff += old_pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
 
             MPI_Barrier(MPI_COMM_WORLD);
@@ -343,6 +352,7 @@ int main(){
 
     read_matrix(file_matrix, edgesDest, offsets, recip_offsets, num_vertices + 1, num_edges);
 
+/*
     cout << "offsets: \n";
     for (int k = 0; k <= num_vertices; k++)
         cout << offsets[k] << " ";
@@ -357,7 +367,7 @@ int main(){
     for (int k = 0; k < num_edges; k++)
         cout << edgesDest[k] << " ";
     cout << endl;
-    
+  */  
 
 
     read_offset_write(offsets,num_vertices);
