@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 
-#define NUM_WORKERS 4
+#define NUM_WORKERS 128
 #define PREPROCESSING 0
 /*mpic++ your_code_file.c
 Execution
@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
 
     MPI_Status status;  /* Status de retorno */
     MPI_Request request;
-    MPI_Request requests[16];
+    MPI_Request requests[500];
     int flag;
 
     MPI_Init (&argc , &argv);
@@ -233,6 +233,9 @@ int main(int argc, char** argv) {
         MPI_Barrier(MPI_COMM_WORLD);
 
         while ((diff_diff > convergence) && num_iterations < max_iterations){
+            double t1_iter, t2_iter;
+            t1_iter = MPI_Wtime();
+
             diff_prev = diff;
             diff = 0;
             for(i = 0; i < tot_num_vertices; i++)
@@ -248,7 +251,7 @@ int main(int argc, char** argv) {
             for (i = 1; i < proc_n; i++)
                 MPI_Wait(&requests[i], &status);
             t2 = MPI_Wtime();
-            printf("[Master] Time for MPI recv: %f\n", t2-t1);
+            printf("[Master] Time for MPI send: %f\n", t2-t1);
             MPI_Barrier(MPI_COMM_WORLD);
             for(int ii = 0; ii < tot_num_vertices; ii++)
                 old_pr[ii] = pr[ii];
@@ -263,6 +266,9 @@ int main(int argc, char** argv) {
 
             MPI_Barrier(MPI_COMM_WORLD);
             num_iterations++;
+            
+            t2_iter = MPI_Wtime();
+            printf("[Master] Iter time: %f\n", t2_iter-t1_iter);
 
         }
 
@@ -326,6 +332,8 @@ int main(int argc, char** argv) {
             printf("[Node %d] Time for MPI recv: %f\n", my_rank, t2-t1);
             MPI_Barrier(MPI_COMM_WORLD);
 
+            t1 = MPI_Wtime();
+
             dangling_pr = 0;
             diff_diff = pr[tot_num_vertices];
             // printf("[ID %d] diff: %f\n",my_rank,diff_diff);
@@ -356,9 +364,12 @@ int main(int argc, char** argv) {
                 h *= alpha;
                 new_pr[i] = h + one_Av + one_Iv;
             }
+            
+            t2 = MPI_Wtime();
+            printf("[Node %d] Time for Comp: %f\n", my_rank, t2-t1);
 
             t1 = MPI_Wtime();
-            MPI_Isend(&new_pr[0], num_vertices, MPI_INT, 0, tag, MPI_COMM_WORLD, &request);
+            MPI_Isend(&new_pr[0], num_vertices, MPI_DOUBLE, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
             t2 = MPI_Wtime();
             printf("[Node %d] Time for MPI send: %f\n", my_rank, t2-t1);

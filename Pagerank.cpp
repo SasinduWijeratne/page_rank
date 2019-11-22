@@ -14,7 +14,7 @@
 #include <math.h>
 #include "mpi.h"
 using namespace std;
-#define NUM_WORKERS 4
+#define NUM_WORKERS 128
 #define PREPROCESSING 0
 /*mpic++ your_code_file.c
 Execution
@@ -162,7 +162,7 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
 }
 
 #if PREPROCESSING == 0
-void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request requests[]){
+void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
 
     double convergence = DEFAULT_CONVERGENCE;
     unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
@@ -179,6 +179,7 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
     size_t tot_num_vertices;
     size_t num_edges;
 
+    MPI_Request request;
 
     char file_metadata[30];
     char filename[20];
@@ -221,6 +222,8 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
     double diff_prev = 999;
     int exit_flag = 0;
     // (fabs(diff - diff_prev) > convergence)
+    struct timespec start_iter, stop_iter, start, stop;
+    double time_iter, time;
 
     while ((num_iterations < max_iterations) && diff > DEFAULT_CONVERGENCE && fabs(diff - diff_prev) > 0.00001 ) {
 
@@ -232,6 +235,8 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
         cout << endl << endl;
 */
 
+        if( clock_gettime( CLOCK_REALTIME, &start_iter) == -1 ) { perror( "clock gettime" );}
+        
         if (num_iterations >= 1) {
             if (num_iterations >= 2)
                 diff_prev = diff;
@@ -254,6 +259,9 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
             pr[i] = (1-alpha)/tot_num_vertices;
 
         for(int sas_i = 0; sas_i < proc_n; sas_i++){
+
+            if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
+
             int ring_partition_id = (id + proc_n - sas_i)%proc_n;
             left = (tot_num_vertices/NUM_WORKERS)*ring_partition_id;
             right = (ring_partition_id == NUM_WORKERS - 1) ? tot_num_vertices : (tot_num_vertices/NUM_WORKERS)*(ring_partition_id+1);
@@ -275,6 +283,12 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
             }
 
 
+            if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
+            time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+            printf("[ID %d][sas_i %d] Comp Time: %f sec\n", id, sas_i, time);
+
+
+            if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
             // if sas_i != proc_n 
             if (id%2 == 0) {
             
@@ -282,23 +296,24 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
                 // printf("id: %d\n",id);
                 // MPI_Send (&pr[0], num_vertices+1, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
                 // MPI_Recv (&pr[0], num_vertices+1, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-                MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &requests[(id+1)%proc_n]);
-                MPI_Wait(&requests[(id+1)%proc_n], &status);
+               
+                MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                MPI_Wait(&request, &status);
                 int use_id = (id == 0)? (proc_n-1): (id-1)%proc_n;
 
-                MPI_Irecv(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[use_id]);
-                MPI_Wait(&requests[use_id], &status);
+                MPI_Irecv(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Wait(&request, &status);
                 
                 // t2 = MPI_Wtime();
                 // printf("\nRound trip(s): %f\n\n", t2-t1);    
             }
             else {
 
-                MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &requests[(id-1)%proc_n]);
-                MPI_Wait(&requests[(id-1)%proc_n], &status);
+                MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Wait(&request, &status);
 
-                MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &requests[(id+1)%proc_n]);
-                MPI_Wait(&requests[(id+1)%proc_n], &status);
+                MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                MPI_Wait(&request, &status);
 
 
                 double * swap = old_pr;
@@ -308,6 +323,10 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
             }
 
 
+            if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
+            time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+            printf("[ID %d][sas_i %d] Comm Time: %f sec\n", id, sas_i, time);
+
 
             diff += old_pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
 
@@ -315,6 +334,11 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag,MPI_Request re
 
         }
         num_iterations++;
+
+        if( clock_gettime( CLOCK_REALTIME, &stop_iter) == -1 ) { perror( "clock gettime" );}       
+        time_iter = (stop_iter.tv_sec - start_iter.tv_sec)+ (double)(stop_iter.tv_nsec - start_iter.tv_nsec)/1e9;
+        printf("[ID %d] Iter Time: %f sec\n", id, time_iter);
+        
         MPI_Barrier(MPI_COMM_WORLD);
     }
     // printf("I exit: %d %f %f\n", id, diff, diff_prev);
@@ -326,8 +350,8 @@ int main(){
 
 #if  PREPROCESSING
     /* Preprocessing */
-    string file_metadata = "graph.metadata";
-    string file_matrix = "graph.txt";
+    string file_metadata = "/staging/vkp2/tye69227/256/graph.metadata";
+    string file_matrix = "/staging/vkp2/tye69227/256/graph.txt";
 
     //vector<size_t> edgesDest;
     //vector<size_t> offsets;
@@ -394,15 +418,14 @@ int main(){
 
     int tag = 50;
     MPI_Status status;  
-    MPI_Request request[NUM_WORKERS];
     MPI_Init (NULL , NULL);
     int my_rank, proc_n;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
     MPI_Comm_size(MPI_COMM_WORLD, &proc_n);
-    // printf("%d\n",proc_n);
+    printf("%d\n",proc_n);
 
     //ring model
-    ring_pagerank(my_rank,status,proc_n,tag, request);
+    ring_pagerank(my_rank,status,proc_n,tag);
 
     MPI_Finalize();
 
