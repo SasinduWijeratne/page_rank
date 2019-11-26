@@ -202,12 +202,11 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     offsets = (size_t *) calloc((tot_num_vertices) , sizeof(size_t));
     recipoffsets = (size_t *) calloc((tot_num_vertices) , sizeof(size_t));
 
-    pr = (double *) calloc(num_vertices , sizeof(double));
-    old_pr = (double *) calloc(tot_num_vertices/NUM_WORKERS + NUM_WORKERS , sizeof(double));
+    pr = (double *) calloc(tot_num_vertices/NUM_WORKERS + NUM_WORKERS, sizeof(double));
+    old_pr = (double *) calloc(tot_num_vertices, sizeof(double));
 
     double *pr1;
     pr1 = (double *) malloc((tot_num_vertices/NUM_WORKERS + NUM_WORKERS) * sizeof(double));
-
 
     read_partition_edges(filename,edgesDest);
     read_partition_offset(filename1,offsets);
@@ -226,120 +225,93 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     double time_iter, time;
 
     while ((num_iterations < max_iterations) && diff > DEFAULT_CONVERGENCE && fabs(diff - diff_prev) > 0.00001 ) {
-
-
         printf("[ID %d] Iter: %d Diff: %f \n", id, num_iterations, diff);
-/*
-        for (int q = 0; q < num_vertices; q++)
-            cout << "[ID " << id << "] " << pr[q] << " ";
-        cout << endl << endl;
-*/
 
         if( clock_gettime( CLOCK_REALTIME, &start_iter) == -1 ) { perror( "clock gettime" );}
         
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
+        left = (tot_num_vertices/NUM_WORKERS)*id;
+
         if (num_iterations >= 1) {
             if (num_iterations >= 2)
                 diff_prev = diff;
             diff = 0;
             for (size_t k = 0; k < num_vertices; k++)
-                diff += fabs(old_pr[k] - pr[k]);
-            old_pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1] = diff;
-            diff = 0;
+                diff += fabs(old_pr[k + left] - pr[k]);
         }
 
-        if (num_iterations == 0) {
+        if (num_iterations == 0)
             old_pr[0] = 1;
-        } else {
-            for (i = 0; i < num_vertices; i++) {
-                old_pr[i] = pr[i];
-            }
-        }
 
         for (i = 0; i < num_vertices; i++)
             pr[i] = (1-alpha)/tot_num_vertices;
 
-        for(int sas_i = 0; sas_i < proc_n; sas_i++){
+        for (i = 0; i < num_vertices; i++) {
+            double h = 0.0;
+            for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
+                double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
+                                ? 1.0 / (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
+                                : 0.0;
+                h += h_v * old_pr[edgesDest[ci]];
+            }
+            h *= alpha;
+            pr[i] += h;
+        }
+        pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1] = diff;
 
-            if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
+        if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
+        time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+        printf("[ID %d][Iter %d] Comp Time: %f sec\n", id, num_iterations, time);
+
+        diff = 0;
+        
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
+        for(int sas_i = 0; sas_i < proc_n; sas_i++){
 
             int ring_partition_id = (id + proc_n - sas_i)%proc_n;
             left = (tot_num_vertices/NUM_WORKERS)*ring_partition_id;
             right = (ring_partition_id == NUM_WORKERS - 1) ? tot_num_vertices : (tot_num_vertices/NUM_WORKERS)*(ring_partition_id+1);
             int current_partition_size = right - left;
 
-
-            for (i = 0; i < num_vertices; i++) {
-                double h = 0.0;
-                for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
-                    if(edgesDest[ci] >= left && edgesDest[ci] < right) {
-                        double h_v = (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
-                                        ? 1.0 / (recipoffsets[edgesDest[ci]+1]-recipoffsets[edgesDest[ci]])
-                                        : 0.0;
-                        h += h_v * old_pr[edgesDest[ci]-left];                        
-                    }
-                }
-                h *= alpha;
-                pr[i] += h;
-            }
-
-
-            if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
-            time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
-            printf("[ID %d][sas_i %d] Comp Time: %f sec\n", id, sas_i, time);
-
-
-            if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
-            // if sas_i != proc_n 
+            // if sas_i != proc_n
             if (id%2 == 0) {
-            
-                // t1 = MPI_Wtime();  
-                // printf("id: %d\n",id);
-                // MPI_Send (&pr[0], num_vertices+1, MPI_INT, (id+1)%proc_n, tag, MPI_COMM_WORLD);
-                // MPI_Recv (&pr[0], num_vertices+1, MPI_INT,(id == 0)? (proc_n-1): (id-1)%proc_n, tag, MPI_COMM_WORLD, &status);
-               
-                MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                for (size_t k = 0; k < current_partition_size; k++)
+                    old_pr[left + k] = pr[k];
+                diff += pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
+
+                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
                 int use_id = (id == 0)? (proc_n-1): (id-1)%proc_n;
 
-                MPI_Irecv(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Irecv(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
-                
-                // t2 = MPI_Wtime();
-                // printf("\nRound trip(s): %f\n\n", t2-t1);    
             }
             else {
 
                 MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
 
-                MPI_Isend(&old_pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                for (size_t k = 0; k < current_partition_size; k++)
+                    old_pr[left + k] = pr[k];
+                diff += pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
+
+                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
 
-
-                double * swap = old_pr;
-                old_pr = pr1;
+                double * swap = pr;
+                pr = pr1;
                 pr1 = swap;
-
             }
-
-
-            if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
-            time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
-            printf("[ID %d][sas_i %d] Comm Time: %f sec\n", id, sas_i, time);
-
-
-            diff += old_pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
-
-            MPI_Barrier(MPI_COMM_WORLD);
-
         }
+        if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
+        time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+        printf("[ID %d][Iter %d] Comm Time: %f sec\n", id, num_iterations, time);
+
         num_iterations++;
 
         if( clock_gettime( CLOCK_REALTIME, &stop_iter) == -1 ) { perror( "clock gettime" );}       
         time_iter = (stop_iter.tv_sec - start_iter.tv_sec)+ (double)(stop_iter.tv_nsec - start_iter.tv_nsec)/1e9;
-        printf("[ID %d] Iter Time: %f sec\n", id, time_iter);
-        
-        MPI_Barrier(MPI_COMM_WORLD);
+        printf("[ID %d][Iter %d] Iter Time: %f sec\n", id, num_iterations, time_iter);
     }
     // printf("I exit: %d %f %f\n", id, diff, diff_prev);
 
