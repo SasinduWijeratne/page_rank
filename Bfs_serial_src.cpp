@@ -23,7 +23,7 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 100; //10000;
+const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
 int trace = 1;
 
 void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, size_t num_vertices){

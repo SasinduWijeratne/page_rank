@@ -25,7 +25,7 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 100;
+const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
 int trace = 1;
 
 void read_partition_edges(char filename[], size_t* edgesDest){
@@ -137,6 +137,9 @@ int main(int argc, char** argv) {
         int len = num_vertices;
         int num_rows = tot_num_vertices;
 
+        double t1_tot, t2_tot;
+
+        t1_tot = MPI_Wtime();
         while (num_iterations < max_iterations){
             double t1_iter, t2_iter;
 
@@ -148,6 +151,9 @@ int main(int argc, char** argv) {
                 for (i = 1; i < proc_n; i++)
                     MPI_Wait(&requests[i], &status[i]);   
 
+                t2_tot = MPI_Wtime();
+                printf("Total Execution Time: %f\n", t2_tot-t1_tot);
+                
                 int count = 0;
                 for (i = 0; i < tot_num_vertices; i++)
                     if (labels[i] == 0) {
