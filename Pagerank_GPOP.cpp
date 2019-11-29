@@ -197,7 +197,7 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
     while (num_iterations < max_iterations && fabs(diff_i_old - diff_i) > 0.0000001){
 
         if(num_iterations == 0){
-            double temp_init =   1.0/tot_num_vertices;
+            double temp_init = 1.0/tot_num_vertices;
             if(temp_init > 0.00000000000000000001){
                 for (i = 0; i < num_vertices; ++i)
                     old_pr[i] = temp_init;  
