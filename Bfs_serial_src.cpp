@@ -23,10 +23,10 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 100; //10000;
+const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
 int trace = 1;
 
-void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
+void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, size_t num_vertices){
     istream *infile;
     infile = new ifstream(filename.c_str());
     string line;
@@ -47,11 +47,15 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets){
         edgesDest[count] = dest;
         count++;
     }
+    prev++;
+    for (; prev <= num_vertices; prev++)
+        offsets[prev] = count;
 }
 
 int main(){
 
     struct timespec start, stop; 
+    struct timespec start_tot, stop_tot; 
     double time;
 
     double convergence = DEFAULT_CONVERGENCE;
@@ -65,8 +69,8 @@ int main(){
     sum_pr = 0;
     dangling_pr = 0;
 
-    string file_metadata = "graph.metadata";
-    string file_matrix = "graph.txt";
+    string file_metadata = "/staging/vkp2/tye69227/256/graph.metadata";
+    string file_matrix = "/staging/vkp2/tye69227/256/graph.txt";
 
     size_t num_vertices;
     size_t num_edges;
@@ -76,52 +80,67 @@ int main(){
     fclose(fp);
 
     size_t *edgesDest, *offsets;
-    size_t *active_vertices, *visited;
+    size_t *visited;
     unsigned *labels;
 
-    active_vertices = (size_t *) malloc(num_vertices * sizeof(size_t));
     visited = (size_t *) calloc(num_vertices, sizeof(size_t));
     labels = (unsigned *) calloc(num_vertices, sizeof(unsigned));
 
     edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
     offsets = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
 
-    offsets[num_vertices] = num_edges;
-    read_matrix(file_matrix, edgesDest, offsets);
-    
+    read_matrix(file_matrix, edgesDest, offsets, num_vertices);
+
     int num_iterations = 0;
     size_t length_active, new_length_active;
+
 
     for (size_t k = 0; k < 1024; k++) {
         size_t s = num_vertices / 1024 * k;
         labels[s] = 1;
-        active_vertices[k] = s;
         visited[s] = 1;
     }
     length_active = 1024;
 
-    if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
-    // iter_pagerank(vector< vector<size_t> > rows, vector<size_t> num_outgoing, vector<double> &pr, double &diff, int &num_iterations, int num_rows)
+/*
+    size_t s = 0;
+    labels[s] = 1;
+    active_vertices[0] = s;
+    visited[s] = 1;
+    length_active = 1;
+*/
+    if( clock_gettime( CLOCK_REALTIME, &start_tot) == -1 ) { perror( "clock gettime" );}
+
     while (num_iterations < max_iterations) {
+        if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
 
         if (length_active == 0) {
+            if( clock_gettime( CLOCK_REALTIME, &stop_tot) == -1 ) { perror( "clock gettime" );}       
+            time = (stop_tot.tv_sec - start_tot.tv_sec)+ (double)(stop_tot.tv_nsec - start_tot.tv_nsec)/1e9;
+            printf("Total Execution Time: %f sec\n",time);
             int count = 0;
             for (i = 0; i < num_vertices; i++)
-                if (labels[i] == 0)
+                if (labels[i] == 0) {
                     count++;
+                }
             cout << "Unvisited: " << count;
             cout << endl;
             break;                 
         }
 
         new_length_active = 0;
-        for (i = 0; i < length_active; i++) {
-            for (size_t ci = offsets[i]; ci < offsets[i+1]; ci++) {
+        for (i = 0; i < num_vertices; i++) {
+            if (labels[i] != num_iterations + 1)
+                continue;
+            size_t l = offsets[i];
+            size_t r = offsets[i+1];
+
+            for (size_t ci = l; ci < r; ci++) {
                 size_t vid = edgesDest[ci];
-                if (!visited[vid]) {
+                if (visited[vid] == 0) {
                     visited[vid] = 1;
-                    active_vertices[new_length_active] = vid;
-                    labels[vid] = num_iterations + 1;
+                    //active_vertices[new_length_active] = vid;
+                    labels[vid] = num_iterations + 2;
                     new_length_active++;
                 }
             }
@@ -133,7 +152,5 @@ int main(){
         time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
         printf("Iter Time: %f sec\n",time);
     }
-
-
 }
 

@@ -25,7 +25,7 @@ mpirun -np <no. of Processors> ./a.out
 
 const double DEFAULT_ALPHA = 0.85;
 const double DEFAULT_CONVERGENCE = 0.00001;
-const unsigned long DEFAULT_MAX_ITERATIONS = 100;
+const unsigned long DEFAULT_MAX_ITERATIONS = 10000;
 int trace = 1;
 
 void read_partition_edges(char filename[], size_t* edgesDest){
@@ -118,6 +118,7 @@ int main(int argc, char** argv) {
         double convergence = DEFAULT_CONVERGENCE;
         unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
 
+
         for (size_t k = 0; k < 1024; k++) {
             s = tot_num_vertices / 1024 * k;
             labels[s] = 1;
@@ -126,7 +127,7 @@ int main(int argc, char** argv) {
         length_active = 1024;
 
 /*
-        s = 5; // just an example
+        s = 0; // just an example
         labels[s] = 1;
         active_vertices[0] = s;
         length_active = 1;
@@ -136,6 +137,9 @@ int main(int argc, char** argv) {
         int len = num_vertices;
         int num_rows = tot_num_vertices;
 
+        double t1_tot, t2_tot;
+
+        t1_tot = MPI_Wtime();
         while (num_iterations < max_iterations){
             double t1_iter, t2_iter;
 
@@ -147,10 +151,14 @@ int main(int argc, char** argv) {
                 for (i = 1; i < proc_n; i++)
                     MPI_Wait(&requests[i], &status[i]);   
 
+                t2_tot = MPI_Wtime();
+                printf("Total Execution Time: %f\n", t2_tot-t1_tot);
+                
                 int count = 0;
                 for (i = 0; i < tot_num_vertices; i++)
-                    if (labels[i] == 0)
+                    if (labels[i] == 0) {
                         count++;
+                    }
                 cout << "Unvisited: " << count;
                 cout << endl;
                 break;     
@@ -250,13 +258,22 @@ int main(int argc, char** argv) {
         int num_iterations = 0;
         double diff_diff = 99;
 
+
         for (size_t k = 0; k < 1024; k++) {
             size_t s = tot_num_vertices / 1024 * k;
+            labels[s] = 1;
             if (s >= left && s < right) {
                 visited[s-left] = 1; 
             }
         }
 
+/*
+        size_t s = 0;
+        labels[s] = 1;
+        if (left == 0) {
+            visited[0] = 1;
+        }
+*/
         while (num_iterations < max_iterations){
             double t1, t2;
             
@@ -292,7 +309,7 @@ int main(int argc, char** argv) {
                     }
                 }
             }
-            
+
             t2 = MPI_Wtime();
             printf("[Node %d][Iter %d] Time for Comp: %f\n", my_rank, num_iterations, t2-t1);
 
