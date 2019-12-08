@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 
-#define NUM_WORKERS 128
+#define NUM_WORKERS 16
 #define PREPROCESSING 0
 /*mpic++ your_code_file.c
 Execution
@@ -230,8 +230,6 @@ int main(int argc, char** argv) {
         int num_rows = tot_num_vertices;
         double diff_diff = 99;
 
-        MPI_Barrier(MPI_COMM_WORLD);
-
         while ((diff_diff > convergence) && num_iterations < max_iterations){
             double t1_iter, t2_iter;
             t1_iter = MPI_Wtime();
@@ -241,6 +239,8 @@ int main(int argc, char** argv) {
             for(i = 0; i < tot_num_vertices; i++)
                 diff += fabs(pr[i] - old_pr[i]);
             diff_diff = fabs(diff - diff_prev);
+
+            printf("[Iter %d] Diff: %f\n", num_iterations, diff);
             
             // printf("[ID 0] diff: %f\n",diff_diff);
             pr[tot_num_vertices] = diff_diff;
@@ -252,7 +252,6 @@ int main(int argc, char** argv) {
                 MPI_Wait(&requests[i], &status);
             t2 = MPI_Wtime();
             printf("[Master] Time for MPI send: %f\n", t2-t1);
-            MPI_Barrier(MPI_COMM_WORLD);
             for(int ii = 0; ii < tot_num_vertices; ii++)
                 old_pr[ii] = pr[ii];
 
@@ -264,7 +263,6 @@ int main(int argc, char** argv) {
             t2 = MPI_Wtime();
             printf("[Master] Time for MPI recv: %f\n", t2-t1);
 
-            MPI_Barrier(MPI_COMM_WORLD);
             num_iterations++;
             
             t2_iter = MPI_Wtime();
@@ -320,36 +318,22 @@ int main(int argc, char** argv) {
         int num_iterations = 0;
         double diff_diff = 99;
 
-        MPI_Barrier(MPI_COMM_WORLD);
-
         while ((diff_diff > convergence) && num_iterations < max_iterations){
 
+            double t1_iter, t2_iter;
+            t1_iter = MPI_Wtime();
+            
             double t1, t2;
             t1 = MPI_Wtime();
             MPI_Irecv(&pr[0], tot_num_vertices+1, MPI_DOUBLE, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
             t2 = MPI_Wtime();
-            printf("[Node %d] Time for MPI recv: %f\n", my_rank, t2-t1);
-            MPI_Barrier(MPI_COMM_WORLD);
+            printf("[Node %d][Iter %d] Time for MPI recv: %f\n", my_rank, num_iterations, t2-t1);
 
             t1 = MPI_Wtime();
 
-            dangling_pr = 0;
             diff_diff = pr[tot_num_vertices];
             // printf("[ID %d] diff: %f\n",my_rank,diff_diff);
-
-            for (size_t k = 0; k < num_vertices; k++) {
-                double cpr = pr[k];
-                if (offsets[k+1] - offsets[k] == 0) {
-                    dangling_pr += cpr;
-                }
-            }
-            
-             /* An element of the A x I vector; all elements are identical */
-            double one_Av = alpha * dangling_pr / tot_num_vertices;
-
-            /* An element of the 1 x I vector; all elements are identical */
-            double one_Iv = (1 - alpha) / tot_num_vertices;
 
             for (i = 0; i < num_vertices; i++) {
                 /* The corresponding element of the H multiplication */
@@ -362,20 +346,22 @@ int main(int argc, char** argv) {
                     h += h_v * pr[edgesDest[ci]];
                 }
                 h *= alpha;
-                new_pr[i] = h + one_Av + one_Iv;
+                new_pr[i] = h + (1-alpha)/tot_num_vertices;
             }
             
             t2 = MPI_Wtime();
-            printf("[Node %d] Time for Comp: %f\n", my_rank, t2-t1);
+            printf("[Node %d][Iter %d] Time for Comp: %f\n", my_rank, num_iterations, t2-t1);
 
             t1 = MPI_Wtime();
             MPI_Isend(&new_pr[0], num_vertices, MPI_DOUBLE, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
             t2 = MPI_Wtime();
-            printf("[Node %d] Time for MPI send: %f\n", my_rank, t2-t1);
+            printf("[Node %d][Iter %d] Time for MPI send: %f\n", my_rank, num_iterations, t2-t1);
 
-            MPI_Barrier(MPI_COMM_WORLD);
             num_iterations++;
+            
+            t2_iter = MPI_Wtime();
+            printf("[Node %d][Iter %d] Iter time: %f\n", my_rank, num_iterations, t2_iter-t1_iter);
 
         }
 
