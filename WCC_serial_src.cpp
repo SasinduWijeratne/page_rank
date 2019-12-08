@@ -51,25 +51,30 @@ void read_matrix(const string &filename, size_t num_vertices, size_t num_edges, 
         edgesDest[count] = dest;
         count++;
 
-        if (prev2 != dest) {
-            prev2++;
-            for (; prev2 < dest; prev2++)
-                offsets2[prev2] = count2;
-            offsets2[dest] = count2;
-            prev2 = dest;
-        }
-        edgesDest2[count2] = src;
-        count2++;
+        offsets2[dest+1]++;
     }
-
     prev++;
     for (; prev <= num_vertices; prev++)
         offsets[prev] = num_edges;
 
-    prev2++;
-    for (; prev2 <= num_vertices; prev2++)
-        offsets2[prev2] = num_edges;
+    offsets2[0] = 0;
+    for (size_t kk = 1; kk <= num_vertices; kk++)
+        offsets2[kk] = offsets2[kk-1] + offsets2[kk];
+    
+    istream *infile2;
+    infile2 = new ifstream(filename.c_str());
+    string line2;
+    size_t* temp_offsets;
+    temp_offsets = (size_t *) calloc((num_vertices) , sizeof(size_t));
 
+    while (getline(*infile2, line2)){
+        stringstream lineStream(line2);
+        size_t src, dest;
+        lineStream >> src >> dest;
+        edgesDest2[offsets2[dest] + temp_offsets[dest]] = src;
+        temp_offsets[dest]++;
+    }
+    free(temp_offsets);
 }
 
 void wcc(){
@@ -112,7 +117,29 @@ void wcc(){
     offsets2 = (size_t *) malloc((num_vertices + 1) * sizeof(size_t));
 
     read_matrix(file_matrix, num_vertices, num_edges, edgesDest, offsets, edgesDest2, offsets2);
-    
+/*
+    cout << "offsets: " << endl;
+    for (size_t k = 0; k <= num_vertices; k++)
+        cout << offsets[k] << " ";
+    cout << endl;
+
+
+    cout << "edgesDest: " << endl;
+    for (size_t k = 0; k < num_edges; k++)
+        cout << edgesDest[k] << " ";
+    cout << endl;
+
+    cout << "offsets2: " << endl;
+    for (size_t k = 0; k <= num_vertices; k++)
+        cout << offsets2[k] << " ";
+    cout << endl;
+
+    cout << "edgesDest2: " << endl;
+    for (size_t k = 0; k < num_edges; k++)
+        cout << edgesDest2[k] << " ";
+    cout << endl;
+*/
+
     for (size_t k = 0; k < num_vertices; k++)
         pr[k] = num_vertices; // initialize pr[:] = INF
 
@@ -128,9 +155,12 @@ void wcc(){
         for (size_t v = 0; v < num_vertices; v++) {
             for (size_t ci = offsets2[v]; ci < offsets2[v+1]; ci++) {
                 size_t u = edgesDest2[ci];
+//                if (u < 3)
+//                    cout << v << " ";
                 if (pr[u] < rank[v]) {
                     rank[v] = pr[u];
                     hasUpdate = 1;
+                    //cout << v << " ";
                 }
             }
             if (pr[v] != rank[v]) {
