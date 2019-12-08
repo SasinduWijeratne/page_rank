@@ -133,12 +133,15 @@ void wcc(){
                     hasUpdate = 1;
                 }
             }
-            pr[v] = rank[v];
+            if (pr[v] != rank[v]) {
+                pr[v] = rank[v];
+                hasUpdate = 1;
+            }
         }
-        num_iterations++;
         if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
         time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
         printf("Round 1 Iter %d Time: %f sec\n", num_iterations, time);
+        num_iterations++;
     }
 
     num_iterations = 0;
@@ -154,12 +157,15 @@ void wcc(){
                     hasUpdate = 1;
                 }
             }
-            pr[v] = rank[v];
+            if (pr[v] != rank[v]) {
+                pr[v] = rank[v];
+                hasUpdate = 1;
+            }
         }
-        num_iterations++;
         if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
         time = (stop.tv_sec - start.tv_sec)+ (double)(stop.tv_nsec - start.tv_nsec)/1e9;
         printf("Round 2 Iter %d Time: %f sec\n", num_iterations, time);
+        num_iterations++;
     }   
 
 }
