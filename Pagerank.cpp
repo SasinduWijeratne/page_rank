@@ -14,7 +14,7 @@
 #include <math.h>
 #include "mpi.h"
 using namespace std;
-#define NUM_WORKERS 128
+#define NUM_WORKERS 16
 #define PREPROCESSING 0
 /*mpic++ your_code_file.c
 Execution
@@ -23,7 +23,7 @@ mpirun -np <no. of Processors> ./a.out
 */
 
 const double DEFAULT_ALPHA = 0.85;
-const double DEFAULT_CONVERGENCE = 0.001;
+const double DEFAULT_CONVERGENCE = 0.00001;
 const unsigned long DEFAULT_MAX_ITERATIONS = 100;
 int trace = 1;
 
@@ -224,7 +224,7 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     struct timespec start_iter, stop_iter, start, stop;
     double time_iter, time;
 
-    while ((num_iterations < max_iterations) && diff > DEFAULT_CONVERGENCE && fabs(diff - diff_prev) > 0.00001 ) {
+    while ((num_iterations < max_iterations) && diff > DEFAULT_CONVERGENCE) { // && fabs(diff - diff_prev) > 0.00001 ) {
         printf("[ID %d] Iter: %d Diff: %f \n", id, num_iterations, diff);
 
         if( clock_gettime( CLOCK_REALTIME, &start_iter) == -1 ) { perror( "clock gettime" );}
@@ -232,19 +232,8 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
         if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
         left = (tot_num_vertices/NUM_WORKERS)*id;
 
-        if (num_iterations >= 1) {
-            if (num_iterations >= 2)
-                diff_prev = diff;
-            diff = 0;
-            for (size_t k = 0; k < num_vertices; k++)
-                diff += fabs(old_pr[k + left] - pr[k]);
-        }
-
         if (num_iterations == 0)
             old_pr[0] = 1;
-
-        for (i = 0; i < num_vertices; i++)
-            pr[i] = (1-alpha)/tot_num_vertices;
 
         for (i = 0; i < num_vertices; i++) {
             double h = 0.0;
@@ -255,8 +244,18 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                 h += h_v * old_pr[edgesDest[ci]];
             }
             h *= alpha;
-            pr[i] += h;
+            pr[i] = h + (1-alpha)/tot_num_vertices;
         }
+        
+        if (num_iterations >= 1) {
+            if (num_iterations >= 2)
+                diff_prev = diff;
+            diff = 0;
+            for (size_t k = 0; k < num_vertices; k++)
+                diff += fabs(old_pr[k + left] - pr[k]);
+//            printf("[ID %d] diff: %f\n", id, diff);
+        }
+        
         pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1] = diff;
 
         if( clock_gettime( CLOCK_REALTIME, &stop) == -1 ) { perror( "clock gettime" );}       
@@ -278,6 +277,8 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                 for (size_t k = 0; k < current_partition_size; k++)
                     old_pr[left + k] = pr[k];
                 diff += pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
+//                cout << "[ID" << id << "] " << pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1] << endl;
+
 
                 MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
@@ -322,8 +323,8 @@ int main(){
 
 #if  PREPROCESSING
     /* Preprocessing */
-    string file_metadata = "/staging/vkp2/tye69227/256/graph.metadata";
-    string file_matrix = "/staging/vkp2/tye69227/256/graph.txt";
+    string file_metadata = "graph.metadata";
+    string file_matrix = "graph.txt";
 
     //vector<size_t> edgesDest;
     //vector<size_t> offsets;

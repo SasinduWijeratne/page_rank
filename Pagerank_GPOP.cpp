@@ -21,10 +21,10 @@ mpirun -np <no. of Processors> ./a.out
 */
 #define PREPROCESSING 0
 
-#define NUM_WORKERS 4
+#define NUM_WORKERS 16
 
 const double DEFAULT_ALPHA = 0.85;
-const double DEFAULT_CONVERGENCE = 0.00001;
+const double DEFAULT_CONVERGENCE = 0.001;
 const unsigned long DEFAULT_MAX_ITERATIONS = 100;
 int trace = 1;
 
@@ -120,16 +120,17 @@ void read_matrix(const string &filename, size_t *edgesDest, size_t *offsets, siz
             prev++;
             for (; prev < src; prev++)
                 offsets[prev] = count;
+            offsets[src] = count;
             prev = src;
         }
-        offsets[src] = count;
         edgesDest[count] = dest;
         count++;
     }
-
+/*
     for(size_t i = 0; i < size; i++)
         if(offsets[i] == 0)
             offsets[i] = offsets[i-1];
+*/
 }
 
 #if PREPROCESSING == 0
@@ -155,14 +156,18 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
     // string file_matrix = "mat" + to_string(id) +".txt";
     char file_metadata[30];
     sprintf(file_metadata, "gpoppartition%d.metadata", id);
-    char filename[20];
-    char filename1[20];
+    char filename[30];
+    char filename1[30];
     sprintf(filename, "gpoppartition%d.txt", id);
     sprintf(filename1,"gpopoffset%d.txt",id);
+
+    cout << file_metadata << " " << filename << " " << filename1 << endl;
 
     FILE *fp = fopen(file_metadata, "r");
     fscanf(fp, "%lu %lu %lu", &tot_num_vertices, &num_edges, &num_vertices);
     fclose(fp);
+
+    cout << tot_num_vertices << " " << num_edges << " " << num_vertices << " " << id << endl;
 
     double  *pr, *old_pr;
     size_t *edgesDest, *offsets;
@@ -173,8 +178,12 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
     pr = (double *) calloc(num_vertices , sizeof(double));
     old_pr = (double *) calloc(num_vertices , sizeof(double));
 
+    cout << "Alloc Success " << id << "\n";
+
     read_partition_edges(filename,edgesDest);
     read_partition_offset(filename1,offsets);
+
+    cout << "Reading Success " << id << "\n";
 
     int num_iterations = 0;
     double diff = 99;
@@ -189,12 +198,25 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
 
     // printf("per_buffer_size = %zu %zu\n",per_buffer_size,max_buffer_size);
 
-    double *sending_arr = (double *)malloc(max_buffer_size * sizeof(double)); 
-    double *receiving_arr = (double *)malloc(max_buffer_size * sizeof(double)); 
+    cout << denp << " " << per_buffer_size << " " << max_buffer_size << " " << id << endl;
 
+    double *sending_arr, *receiving_arr; 
 
+    cout << "malloc size " << max_buffer_size * sizeof(double) << " " << id << endl;
+    sending_arr = (double *)malloc(max_buffer_size * sizeof(double)); 
+    cout << "hi " << id << "\n";
+    if (sending_arr == NULL) cout << "sending_arr Error " << id << "\n";
 
-    while (num_iterations < max_iterations && fabs(diff_i_old - diff_i) > 0.0000001){
+    receiving_arr = (double *)malloc(max_buffer_size * sizeof(double)); 
+    cout << "hi2 " << id << "\n";
+    if (receiving_arr == NULL) cout << "recving_arr Error " << id << "\n";
+
+    cout << "Alloc2 Success " << id << "\n";
+
+    struct timespec start_iter, stop_iter, start, stop;
+    double time_iter, time;
+
+    while (num_iterations < max_iterations && fabs(diff_i_old - diff_i) > 0.00001){
 
         if(num_iterations == 0){
             double temp_init = 1.0/tot_num_vertices;
@@ -207,12 +229,17 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
             }
 
         }
-    
+
     // Scatter Phase
+
+        clock_gettime(CLOCK_REALTIME, &start_iter);
+
+        clock_gettime(CLOCK_REALTIME, &start);
 
         for(j=0; j<max_buffer_size; j++){
             sending_arr[j] = 0;
         }
+        
         for (i = 0; i < num_vertices; i++) {
             double temp_pr = (offsets[i+1]-offsets[i]) ? 1.0 / (offsets[i+1]-offsets[i]) : 0.0;
 
@@ -227,55 +254,61 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
         for(size_t send_id = 0; send_id < NUM_WORKERS; send_id++){
             sending_arr[(per_buffer_size)*(send_id+1) + send_id] = diff;
         }
+        
+        clock_gettime(CLOCK_REALTIME, &stop);
+        time = (stop.tv_sec - start.tv_sec) + (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+        printf("[ID %d][Iter %d] Comp1 Time: %f sec\n", id, num_iterations, time);
 
-    MPI_Barrier(MPI_COMM_WORLD);
-    int status_all2all = MPI_Alltoall(sending_arr, per_buffer_size+1, MPI_DOUBLE, receiving_arr, per_buffer_size+1, MPI_DOUBLE, MPI_COMM_WORLD);
-    diff_i_old = diff_i;
-    diff_i = 0;
-    // printf("id: %d diff %f\n",id, diff );
-    // for(i = 0; i < max_buffer_size; i++){
-    //     // diff_i += receiving_arr[(i+1)*per_buffer_size];
-    //     if(receiving_arr[i] == 99){
-    //         printf("[ID %d] %d\n", id, i);
-    //     }
-    // }
+        clock_gettime(CLOCK_REALTIME, &start);
+        
+        int status_all2all = MPI_Alltoall(sending_arr, per_buffer_size+1, MPI_DOUBLE, receiving_arr, per_buffer_size+1, MPI_DOUBLE, MPI_COMM_WORLD);
 
-    // for(size_t send_id = 0; send_id < NUM_WORKERS; send_id++){
-    //     printf("IDX: %d %zu %f\n",id, (per_buffer_size)*(send_id+1) + send_id, receiving_arr[(per_buffer_size)*(send_id+1) + send_id]);
-    // }
-    // printf("[id: %d] i_diff: %f\n",id, diff_i);
-    for(size_t send_id = 0; send_id < NUM_WORKERS; send_id++){
-        diff_i += receiving_arr[(per_buffer_size)*(send_id+1) + send_id];
-    }
+        clock_gettime(CLOCK_REALTIME, &stop);
+        time = (stop.tv_sec - start.tv_sec) + (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+        printf("[ID %d][Iter %d] Comm Time: %f sec\n", id, num_iterations, time);
+        
+        clock_gettime(CLOCK_REALTIME, &start);
 
-    //Gather Phase
-    sum_pr = 0;
-    for (size_t k = 0; k < num_vertices; k++) {
-        double cpr = pr[k];
-        sum_pr += cpr;
-    }
-    if(sum_pr == 0) sum_pr = 1; // Hack for test data
-    diff = 0;
-    for(i=0; i < num_vertices; i++){
-        pr[i] = 0;
-        for(j=0; j < NUM_WORKERS; j++){
-            pr[i] += receiving_arr[j *(per_buffer_size+1) +i];
+        diff_i_old = diff_i;
+        diff_i = 0;
+   
+        for(size_t send_id = 0; send_id < NUM_WORKERS; send_id++){
+            diff_i += receiving_arr[(per_buffer_size)*(send_id+1) + send_id];
         }
+           
+        //Gather Phase
+        sum_pr = 0;
+        for (size_t k = 0; k < num_vertices; k++) {
+            double cpr = pr[k];
+            sum_pr += cpr;
+        }
+
+        if(sum_pr == 0) sum_pr = 1; // Hack for test data
+        diff = 0;
+        for(i=0; i < num_vertices; i++){
+            pr[i] = 0;
+            for(j=0; j < NUM_WORKERS; j++){
+                pr[i] += receiving_arr[j *(per_buffer_size+1) +i];
+            }
             pr[i] = ((1-alpha)/tot_num_vertices) + alpha*pr[i];
 
-        diff += fabs(pr[i] - old_pr[i]);
-    }
+            diff += fabs(pr[i] - old_pr[i]);
+        }
 
-    for(i = 0; i < num_vertices; i++)
-        old_pr[i] = pr[i];
-    num_iterations++;
-
+        for(i = 0; i < num_vertices; i++)
+            old_pr[i] = pr[i];
+        
+        clock_gettime(CLOCK_REALTIME, &stop);
+        time = (stop.tv_sec - start.tv_sec) + (double)(stop.tv_nsec - start.tv_nsec)/1e9;
+        printf("[ID %d][Iter %d] Comp2 Time: %f sec\n", id, num_iterations, time);
+        
+        clock_gettime(CLOCK_REALTIME, &stop_iter);
+        time_iter = (stop_iter.tv_sec - start_iter.tv_sec) + (double)(stop_iter.tv_nsec - start_iter.tv_nsec)/1e9;
+        printf("[ID %d][Iter %d] Total Time: %f sec\n", id, num_iterations, time_iter);
+        printf("[ID %d][Iter %d] Diff: %f \n", id, num_iterations, diff);
+        
+        num_iterations++;
     }
-    // printf("EXIT ID %d %d %f %f %f\n",id, num_iterations,diff_i,diff_i_old, fabs(diff_i_old- diff_i));
-    // for ( i = 0; i < pr.size(); ++i)
-    // {
-    //     printf("%f\n",pr[i]);
-    // }
 
 }
 #endif
@@ -283,8 +316,8 @@ void gpop_pagerank(int id, MPI_Status status, int proc_n, int tag){
 int main(int argc, char** argv){
 #if PREPROCESSING
 
-    string file_metadata = "graph.metadata";
-    string file_matrix = "graph.txt";
+    string file_metadata = "/staging/vkp2/tye69227/256/graph.metadata";
+    string file_matrix = "/staging/vkp2/tye69227/256/graph.txt";
 
     size_t *edgesDest, *offsets, *recip_offsets;
 
@@ -295,10 +328,26 @@ int main(int argc, char** argv){
     fscanf(fp, "%lu %lu", &num_vertices, &num_edges);
     fclose(fp);
 
+    cout << num_vertices << " " << num_edges << endl;
+
     edgesDest = (size_t *) calloc(num_edges , sizeof(size_t));
     offsets = (size_t *) calloc((num_vertices + 1) , sizeof(size_t));
 
     read_matrix(file_matrix,edgesDest,offsets, num_vertices + 1);
+    offsets[num_vertices] = num_edges;
+
+/*    
+    cout << "offsets:\n";
+    for (size_t k = 0; k <= num_vertices; k++)
+        cout << offsets[k] << " ";
+    cout << endl;
+    
+    cout << "edgesDest:\n";
+    for (size_t k = 0; k < num_edges; k++)
+        cout << edgesDest[k] << " ";
+    cout << endl;
+*/
+
     read_offset_write(offsets,num_vertices);
     read_partition_write(offsets, edgesDest, num_vertices);
     partition_meta(num_vertices,offsets);
@@ -306,7 +355,7 @@ int main(int argc, char** argv){
 #else
     int tag = 50;
     MPI_Status status;  
-
+    
     MPI_Init (&argc , &argv);
     int my_rank, proc_n;
     MPI_Comm_rank(MPI_COMM_WORLD, &my_rank);
