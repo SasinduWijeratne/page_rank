@@ -15,7 +15,7 @@
 #include "mpi.h"
 using namespace std;
 
-#define NUM_WORKERS 16
+#define NUM_WORKERS 4
 #define PREPROCESSING 0
 /*mpic++ your_code_file.c
 Execution
@@ -86,6 +86,8 @@ int main(int argc, char** argv) {
         fscanf(fp, "%lu %lu %lu", &tot_num_vertices, &num_edges, &num_vertices);
         fclose(fp);
 
+        cout << tot_num_vertices << " " << num_edges << " " << num_vertices << endl;
+
         size_t each_num_vertices[NUM_WORKERS] = {0};
 
         for (int pid = 0; pid < NUM_WORKERS; pid++) {
@@ -99,6 +101,7 @@ int main(int argc, char** argv) {
         size_t *edgesDest, *offsets, *recip_offsets;
 
         pr = (size_t *) malloc((tot_num_vertices +1)* sizeof(size_t));
+        old_pr = (size_t *) malloc((tot_num_vertices +1)* sizeof(size_t));
 
         unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
 
@@ -110,6 +113,10 @@ int main(int argc, char** argv) {
         int len = num_vertices;
         int num_rows = tot_num_vertices;
         int hasUpdate = 1;
+
+
+        cout << "pr[0]: " << pr[0] << endl;
+        cout << pr[46372] << " " << pr[84294] << endl;
 
         while (hasUpdate && num_iterations < max_iterations){
             double t1_iter, t2_iter;
@@ -141,13 +148,25 @@ int main(int argc, char** argv) {
             printf("[Master][Round 1] Time for MPI recv: %f\n", t2-t1);
 
             num_iterations++;
+
+            int count = 0;
+            for (int kk = 0; kk < tot_num_vertices; kk++)
+                if (pr[kk] != 0) {
+                    count++;
+                } else {
+                    if (kk-count <= 10)
+                        cout << kk << " ";
+                }
+            cout << endl;
+            cout << "Non-zero: " << count <<endl;
             
             t2_iter = MPI_Wtime();
             printf("[Master][Round 1] Iter time: %f\n", t2_iter-t1_iter);
         }
 
+        num_iterations = 0;
         hasUpdate = 1;
-        while (hasUpdate && num_iterations < max_iterations){
+        while ((hasUpdate || num_iterations < 3) && num_iterations < max_iterations){
             double t1_iter, t2_iter;
             t1_iter = MPI_Wtime();
             hasUpdate = 0;
@@ -176,6 +195,17 @@ int main(int argc, char** argv) {
             t2 = MPI_Wtime();
             printf("[Master][Round 2] Time for MPI recv: %f\n", t2-t1);
 
+            int count = 0;
+            for (int kk = 0; kk < tot_num_vertices; kk++)
+                if (pr[kk] != 0) {
+                    count++;
+                } else {
+                    if (kk-count <= 10)
+                        cout << kk << " ";
+                }
+            cout << endl;
+            cout << "Non-zero: " << count <<endl;
+            
             num_iterations++;
             
             t2_iter = MPI_Wtime();
@@ -187,12 +217,14 @@ int main(int argc, char** argv) {
     else{
 
         char file_metadata[30];
+        char file_metadata2[30];
         char filename[30];
         char filename1[30];
         char filename2[30];
         char filename3[30];
 
         sprintf(file_metadata, "partition%d.metadata", my_rank-1);
+        sprintf(file_metadata2, "gpoppartition%d.metadata", my_rank-1);
         sprintf(filename, "partition%d.txt", my_rank-1);
         sprintf(filename1, "offset%d.txt", my_rank-1);
         sprintf(filename2, "gpoppartition%d.txt", my_rank-1);
@@ -200,27 +232,42 @@ int main(int argc, char** argv) {
 
         size_t num_vertices;
         size_t tot_num_vertices;
-        size_t num_edges;
+        size_t num_edges, num_edges2;
 
         FILE *fp = fopen(file_metadata, "r");
+        fscanf(fp, "%lu %lu %lu", &tot_num_vertices, &num_edges2, &num_vertices);
+        fclose(fp);
+
+        cout << "[Worker " << my_rank << "] " << tot_num_vertices << " " << num_edges2 << " " << num_vertices << endl;
+
+        fp = fopen(file_metadata2, "r");
         fscanf(fp, "%lu %lu %lu", &tot_num_vertices, &num_edges, &num_vertices);
         fclose(fp);
 
-        size_t *pr, *rank;
+        cout << "[Worker " << my_rank << "] " <<  tot_num_vertices << " " << num_edges << " " << num_vertices << endl;
+
+        size_t *pr, *new_pr, *rank;
         size_t *edgesDest, *offsets, *edgesDest2, *offsets2;
 
         edgesDest = (size_t *) malloc(num_edges * sizeof(size_t));
         offsets = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
-        edgesDest2 = (size_t *) malloc(num_edges * sizeof(size_t));
+        edgesDest2 = (size_t *) malloc(num_edges2 * sizeof(size_t));
         offsets2 = (size_t *) malloc((tot_num_vertices) * sizeof(size_t));
 
-        read_partition_edges(filename,edgesDest);
-        read_partition_offset(filename1,offsets);
-        read_partition_edges(filename2,edgesDest2);
-        read_partition_offset(filename3,offsets2);
+        read_partition_edges(filename,edgesDest2);
+        read_partition_offset(filename1,offsets2);
+        read_partition_edges(filename2,edgesDest);
+        read_partition_offset(filename3,offsets);
 
         pr = (size_t *) malloc((tot_num_vertices+1)*sizeof(size_t));
+        new_pr = (size_t *) malloc(num_vertices*sizeof(size_t));
         rank = (size_t *) malloc(num_vertices*sizeof(size_t));
+
+        size_t left, num_vertices_per_worker = tot_num_vertices/NUM_WORKERS;
+        left = num_vertices_per_worker*(my_rank-1);
+        
+        for (size_t v = 0; v < num_vertices; v++)
+            rank[v] = v + left;
 
         unsigned long max_iterations = DEFAULT_MAX_ITERATIONS;
 
@@ -228,7 +275,6 @@ int main(int argc, char** argv) {
         int hasUpdate = 1;
 
         while (hasUpdate && num_iterations < max_iterations){
-
             double t1_iter, t2_iter;
             t1_iter = MPI_Wtime();
             
@@ -240,6 +286,7 @@ int main(int argc, char** argv) {
             printf("[Node %d][Round 1][Iter %d] Time for MPI recv: %f\n", my_rank, num_iterations, t2-t1);
 
             t1 = MPI_Wtime();
+
             hasUpdate = pr[tot_num_vertices];
             for (size_t v = 0; v < num_vertices; v++) {
                 for (size_t ci = offsets2[v]; ci < offsets2[v+1]; ci++) {
@@ -247,13 +294,13 @@ int main(int argc, char** argv) {
                     if (pr[u] < rank[v]) 
                         rank[v] = pr[u];
                 }
-                pr[v] = rank[v];
+                new_pr[v] = rank[v];
             }
             t2 = MPI_Wtime();
             printf("[Node %d][Round 1][Iter %d] Time for Comp: %f\n", my_rank, num_iterations, t2-t1);
 
             t1 = MPI_Wtime();
-            MPI_Isend(&pr[0], num_vertices, MPI_UNSIGNED_LONG, 0, tag, MPI_COMM_WORLD, &request);
+            MPI_Isend(&new_pr[0], num_vertices, MPI_UNSIGNED_LONG, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
             t2 = MPI_Wtime();
             printf("[Node %d][Round 1][Iter %d] Time for MPI send: %f\n", my_rank, num_iterations, t2-t1);
@@ -264,9 +311,9 @@ int main(int argc, char** argv) {
             printf("[Node %d][Round 1][Iter %d] Iter time: %f\n", my_rank, num_iterations, t2_iter-t1_iter);
         }
 
+        num_iterations = 0;
         hasUpdate = 1;
-        while (hasUpdate && num_iterations < max_iterations){
-
+        while ((hasUpdate || num_iterations < 3) && num_iterations < max_iterations){
             double t1_iter, t2_iter;
             t1_iter = MPI_Wtime();
             
@@ -285,13 +332,13 @@ int main(int argc, char** argv) {
                     if (pr[u] < rank[v]) 
                         rank[v] = pr[u];
                 }
-                pr[v] = rank[v];
+                new_pr[v] = rank[v];
             }
             t2 = MPI_Wtime();
             printf("[Node %d][Round 2][Iter %d] Time for Comp: %f\n", my_rank, num_iterations, t2-t1);
 
             t1 = MPI_Wtime();
-            MPI_Isend(&pr[0], num_vertices, MPI_UNSIGNED_LONG, 0, tag, MPI_COMM_WORLD, &request);
+            MPI_Isend(&new_pr[0], num_vertices, MPI_UNSIGNED_LONG, 0, tag, MPI_COMM_WORLD, &request);
             MPI_Wait(&request, &status);
             t2 = MPI_Wtime();
             printf("[Node %d][Round 2][Iter %d] Time for MPI send: %f\n", my_rank, num_iterations, t2-t1);

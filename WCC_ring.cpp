@@ -14,7 +14,7 @@
 #include <math.h>
 #include "mpi.h"
 using namespace std;
-#define NUM_WORKERS 16
+#define NUM_WORKERS 4
 /*mpic++ your_code_file.c
 Execution
 
@@ -133,25 +133,35 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
     int hasUpdate = 1;
 
     while ((num_iterations < max_iterations) && hasUpdate) {
+
+        int count = 0;
+        for (size_t v = 0; v < tot_num_vertices; v++)
+            if (old_pr[v] != 0)
+                count++;
+        cout << "Non-zero: " << count << endl;
+
+
         if( clock_gettime( CLOCK_REALTIME, &start_iter) == -1 ) { perror( "clock gettime" );}        
         if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
         
+
+        int update_count = 0;
         for (size_t v = 0; v < num_vertices; v++) {
             for (size_t ci = offsets2[v]; ci < offsets2[v+1]; ci++) {
                 size_t u = edgesDest2[ci];
                 if (old_pr[u] < rank[v]) 
                     rank[v] = old_pr[u];
             }
+            if (pr[v] != rank[v]) {
+                update_count++;
+            }
             pr[v] = rank[v];
         }
 
         hasUpdate = 0;
-        for (size_t k = 0; k < num_vertices; k++)
-            if (old_pr[k + left] != pr[k]) {
-                hasUpdate = 1;
-                break;
-            }
-        
+        if (update_count > 0)
+            hasUpdate = 1;
+
         pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1] = hasUpdate;
 
         hasUpdate = 0;
@@ -173,23 +183,23 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                     old_pr[left + k] = pr[k];
                 hasUpdate |= pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
 
-                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
                 int use_id = (id == 0)? (proc_n-1): (id-1)%proc_n;
 
-                MPI_Irecv(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Irecv(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
             }
             else {
 
-                MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
 
                 for (size_t k = 0; k < current_partition_size; k++)
                     old_pr[left + k] = pr[k];
                 hasUpdate |= pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
 
-                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
 
                 size_t * swap = pr;
@@ -213,21 +223,17 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
         if( clock_gettime( CLOCK_REALTIME, &start_iter) == -1 ) { perror( "clock gettime" );}        
         if( clock_gettime( CLOCK_REALTIME, &start) == -1 ) { perror( "clock gettime" );}
         
+        hasUpdate = 0;
         for (size_t v = 0; v < num_vertices; v++) {
             for (size_t ci = offsets[v]; ci < offsets[v+1]; ci++) {
                 size_t u = edgesDest[ci];
                 if (old_pr[u] < rank[v]) 
                     rank[v] = old_pr[u];
             }
+            if (pr[v] != rank[v]) 
+                hasUpdate = 1;
             pr[v] = rank[v];
         }
-
-        hasUpdate = 0;
-        for (size_t k = 0; k < num_vertices; k++)
-            if (old_pr[k + left] != pr[k]) {
-                hasUpdate = 1;
-                break;
-            }
         
         pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1] = hasUpdate;
 
@@ -250,23 +256,23 @@ void ring_pagerank(int id, MPI_Status status, int proc_n, int tag){
                     old_pr[left + k] = pr[k];
                 hasUpdate |= pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
 
-                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
                 int use_id = (id == 0)? (proc_n-1): (id-1)%proc_n;
 
-                MPI_Irecv(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Irecv(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG, use_id, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
             }
             else {
 
-                MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
+                MPI_Irecv(&pr1[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG,  (id-1)%proc_n, MPI_ANY_TAG, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
 
                 for (size_t k = 0; k < current_partition_size; k++)
                     old_pr[left + k] = pr[k];
                 hasUpdate |= pr[tot_num_vertices/NUM_WORKERS + NUM_WORKERS - 1];
 
-                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_DOUBLE, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
+                MPI_Isend(&pr[0], tot_num_vertices/NUM_WORKERS + NUM_WORKERS, MPI_UNSIGNED_LONG, (id+1)%proc_n, tag, MPI_COMM_WORLD, &request);
                 MPI_Wait(&request, &status);
 
                 size_t *swap = pr;
